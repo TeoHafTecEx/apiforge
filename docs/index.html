@@ -1,0 +1,581 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>apiforge</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔩</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  color-scheme: light;
+  --paper: #F2F4F1;
+  --surface: #FFFFFF;
+  --ink: #18222B;
+  --muted: #5B6872;
+  --line: #CBD3D0;
+  --amber: #A85F06;
+  --amber-soft: #F6E7D2;
+  --pine: #0B6E5F;
+  --pine-soft: #DCEFEA;
+  --red: #A3261B;
+  --red-soft: #F7E1DE;
+  --sans: "Schibsted Grotesk", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --paper: #12181D;
+    --surface: #1A2228;
+    --ink: #E6EBE8;
+    --muted: #93A1A9;
+    --line: #2C3740;
+    --amber: #E3A04A;
+    --amber-soft: #33281A;
+    --pine: #4FBFA6;
+    --pine-soft: #17302B;
+    --red: #F08A7E;
+    --red-soft: #3A1F1C;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 1rem/1.55 var(--sans);
+}
+main { max-width: 46rem; margin: 0 auto; padding: 3rem 1.25rem 5rem; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+/* header */
+.brand { font-weight: 700; font-size: 1.05rem; letter-spacing: -0.01em; margin: 0 0 2.5rem; display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+.brand button { font-weight: 500; }
+h1 { font-size: clamp(2rem, 6vw, 3.1rem); line-height: 1.05; letter-spacing: -0.035em; font-weight: 700; margin: 0 0 0.75rem; max-width: 14ch; }
+.lede { color: var(--muted); font-size: 1.1rem; margin: 0 0 2rem; max-width: 36rem; }
+
+/* form */
+.field { display: block; margin-bottom: 1.1rem; }
+.field > span { display: block; font-weight: 600; font-size: 0.95rem; margin-bottom: 0.35rem; }
+.field > small { display: block; color: var(--muted); font-size: 0.875rem; margin-top: 0.3rem; }
+input, textarea {
+  width: 100%; font: inherit; color: var(--ink); background: var(--surface);
+  border: 1.5px solid var(--line); border-radius: 6px; padding: 0.7rem 0.85rem;
+}
+input:focus, textarea:focus { border-color: var(--ink); outline: none; }
+.url-input { font-size: 1.25rem; padding: 0.95rem 1rem; font-weight: 500; }
+textarea { min-height: 5rem; resize: vertical; }
+.actions { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-top: 1.4rem; }
+button {
+  font: inherit; cursor: pointer; border-radius: 6px; border: 1.5px solid var(--ink);
+  background: transparent; color: var(--ink); padding: 0.45rem 0.85rem; font-size: 0.9rem;
+}
+button.primary { background: var(--ink); color: var(--paper); font-weight: 600; font-size: 1.05rem; padding: 0.8rem 1.5rem; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+.hint { color: var(--muted); font-size: 0.9rem; }
+.error { color: var(--red); background: var(--red-soft); padding: 0.75rem 0.9rem; border-radius: 6px; margin-top: 1rem; }
+
+/* progress: a real sequence, so it is numbered */
+section.run { margin-top: 3rem; padding-top: 2rem; border-top: 1.5px solid var(--line); }
+.run-head { display: flex; justify-content: space-between; gap: 1rem; align-items: baseline; flex-wrap: wrap; }
+.run-head h2 { margin: 0; font-size: 1.35rem; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+.stages { list-style: none; padding: 0; margin: 1.5rem 0; display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem; counter-reset: stage; }
+.stages li { counter-increment: stage; border-top: 3px solid var(--line); padding-top: 0.55rem; font-size: 0.9rem; color: var(--muted); }
+.stages li::before { content: counter(stage); font-weight: 700; margin-right: 0.35rem; }
+.stages li.done { border-color: var(--pine); color: var(--ink); }
+.stages li.active { border-color: var(--amber); color: var(--ink); font-weight: 600; }
+.stages li.failed { border-color: var(--red); color: var(--red); font-weight: 600; }
+@media (prefers-reduced-motion: no-preference) {
+  .stages li.active { animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: 0.55; } }
+}
+
+/* the trace: what the agent did and what it found */
+.trace {
+  background: var(--surface); border: 1.5px solid var(--line); border-radius: 6px;
+  max-height: 22rem; overflow: auto; padding: 0.75rem 0; font: 0.82rem/1.6 var(--mono);
+}
+.trace div { padding: 0 0.9rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.trace .act { color: var(--muted); }
+.trace .found { color: var(--pine); font-weight: 500; }
+.trace .fail { color: var(--red); }
+.trace .pass { color: var(--pine); }
+.trace .note { color: var(--ink); font-family: var(--sans); font-weight: 600; font-size: 0.9rem; padding-top: 0.5rem; }
+
+/* result */
+.result { margin-top: 2rem; border: 2px solid var(--pine); border-radius: 8px; padding: 1.5rem; background: var(--surface); }
+.result.warn { border-color: var(--amber); }
+.result h3 { margin: 0 0 0.25rem; font-size: 1.3rem; letter-spacing: -0.02em; }
+.result > p { margin: 0 0 1.25rem; color: var(--muted); }
+.kv { margin-bottom: 1rem; }
+.kv > span { display: block; font-weight: 600; font-size: 0.9rem; margin-bottom: 0.3rem; }
+.copyrow { display: flex; gap: 0.5rem; align-items: stretch; }
+.copyrow code {
+  flex: 1; min-width: 0; font: 0.9rem/1.4 var(--mono); background: var(--paper); border: 1.5px solid var(--line);
+  border-radius: 6px; padding: 0.6rem 0.75rem; overflow-x: auto; white-space: nowrap;
+}
+.copyrow.secret code { border-color: var(--amber); background: var(--amber-soft); }
+.callout { background: var(--amber-soft); border-radius: 6px; padding: 0.6rem 0.8rem; font-size: 0.9rem; margin: -0.4rem 0 1rem; }
+details { margin-top: 1rem; border-top: 1.5px solid var(--line); padding-top: 0.75rem; }
+summary { cursor: pointer; font-weight: 600; }
+details pre { font: 0.82rem/1.5 var(--mono); background: var(--paper); border-radius: 6px; padding: 0.75rem; overflow-x: auto; }
+details ol, details ul { padding-left: 1.2rem; }
+details li { margin-bottom: 0.3rem; }
+
+/* list of APIs */
+section.apis { margin-top: 3.5rem; }
+section.apis h2 { font-size: 1.35rem; letter-spacing: -0.02em; margin: 0 0 0.75rem; }
+.api-row { display: grid; grid-template-columns: 1fr auto; gap: 0.25rem 1rem; padding: 0.9rem 0; border-top: 1.5px solid var(--line); }
+.api-row:last-child { border-bottom: 1.5px solid var(--line); }
+.api-row .name { font-weight: 600; }
+.api-row .meta { color: var(--muted); font-size: 0.875rem; grid-column: 1; overflow-wrap: anywhere; }
+.api-row .meta code { font-family: var(--mono); font-size: 0.82rem; }
+.api-row .btns { grid-row: 1 / span 2; grid-column: 2; display: flex; gap: 0.4rem; align-items: center; }
+.api-row .newkey { grid-column: 1 / -1; }
+.badge { font-size: 0.78rem; font-weight: 600; padding: 0.1rem 0.45rem; border-radius: 4px; margin-left: 0.4rem; vertical-align: 0.1em; }
+.badge.ok { background: var(--pine-soft); color: var(--pine); }
+.badge.bad { background: var(--amber-soft); color: var(--amber); }
+.empty { color: var(--muted); }
+
+/* key gate */
+.gate { background: var(--surface); border: 1.5px solid var(--line); border-radius: 8px; padding: 1.25rem; margin-bottom: 2rem; }
+.gate h2 { margin: 0 0 0.3rem; font-size: 1.15rem; }
+.gate p { margin: 0 0 1rem; color: var(--muted); }
+.gate .copyrow input { flex: 1; }
+
+@media (max-width: 560px) {
+  main { padding-top: 2rem; }
+  .stages { grid-template-columns: 1fr; gap: 0.35rem; }
+  .stages li { border-top: 0; border-left: 3px solid var(--line); padding: 0.1rem 0 0.1rem 0.6rem; }
+  .api-row { grid-template-columns: 1fr; }
+  .api-row .btns { grid-row: auto; grid-column: 1; }
+  .copyrow { flex-wrap: wrap; }
+  .copyrow code { flex-basis: 100%; }
+}
+[hidden] { display: none !important; }
+</style>
+
+<style>
+.gate .row { display: grid; gap: 0.9rem; }
+.gate label > span { display: block; font-weight: 600; font-size: 0.9rem; margin-bottom: 0.3rem; }
+.gate small { display: block; color: var(--muted); font-size: 0.85rem; margin-top: 0.3rem; }
+.gate details { border: 0; padding: 0; margin: 0.25rem 0 0; }
+.gate details summary { font-weight: 500; font-size: 0.9rem; color: var(--muted); }
+.gate ol { margin: 0.5rem 0 0; padding-left: 1.2rem; font-size: 0.9rem; color: var(--muted); }
+.actions-list { margin: 0 0 1rem; }
+.action { border-top: 1.5px solid var(--line); padding: 0.75rem 0; }
+.action:last-child { border-bottom: 1.5px solid var(--line); }
+.action .an { font-weight: 600; font-family: var(--mono); font-size: 0.95rem; }
+.action p { margin: 0.15rem 0 0.5rem; color: var(--muted); font-size: 0.9rem; }
+.steps-knime { padding-left: 1.2rem; margin: 0.5rem 0 0; }
+.steps-knime li { margin-bottom: 0.55rem; }
+.run-link { font-size: 0.9rem; }
+.btnrow { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0.25rem 0 1rem; }
+</style>
+
+</head>
+<body>
+<main>
+  <p class="brand"><span>apiforge</span><button type="button" id="settings-btn" hidden>Settings</button></p>
+
+  <div class="gate" id="gate" hidden>
+    <h2>Connect to your GitHub repo</h2>
+    <p>Builds run as GitHub Actions in your repo. This page needs a token to start them and read the results. It stays in this browser.</p>
+    <div class="row">
+      <label><span>Repository</span><input id="cfg-repo" placeholder="your-name/apiforge" autocomplete="off"></label>
+      <label><span>GitHub token</span><input id="cfg-token" type="password" placeholder="github_pat_…" autocomplete="off">
+        <small>A fine-grained token for this repository only.</small></label>
+      <details>
+        <summary>How to create the token</summary>
+        <ol>
+          <li>On GitHub, open Settings, then Developer settings, then Personal access tokens, then Fine-grained tokens.</li>
+          <li>Choose Generate new token. Under Repository access, pick Only select repositories and select this repo.</li>
+          <li>Under Repository permissions, set Actions to Read and write, and Contents to Read-only.</li>
+          <li>Generate it and paste it here.</li>
+        </ol>
+      </details>
+      <div class="actions" style="margin-top:0"><button type="button" class="primary" id="cfg-save">Connect</button></div>
+    </div>
+    <div class="error" id="gate-error" hidden></div>
+  </div>
+
+  <h1>Turn a website into an API.</h1>
+  <p class="lede">Paste a site and say what you need from it. An agent explores it, writes an API, tests it against the live site, and hands you a script to run as a KNIME service.</p>
+
+  <form id="forge" novalidate>
+    <label class="field">
+      <span>Website</span>
+      <input class="url-input" id="url" type="url" inputmode="url" placeholder="https://hts.usitc.gov" required autocomplete="url">
+    </label>
+    <label class="field">
+      <span>What should the API do?</span>
+      <textarea id="goal" placeholder="Search HS codes by keyword or number and return duty rates"></textarea>
+      <small>Optional, but specific goals give much better APIs. Leave it empty to cover the site’s main search and detail pages.</small>
+    </label>
+    <label class="field">
+      <span>Name</span>
+      <input id="name" placeholder="hts-tariffs" autocomplete="off">
+      <small>Optional. Defaults to the site’s domain. Using an existing name rebuilds that API.</small>
+    </label>
+    <div class="actions">
+      <button class="primary" type="submit" id="go">Build API</button>
+      <span class="hint">Usually takes 5–15 minutes.</span>
+    </div>
+    <div class="error" id="form-error" hidden></div>
+  </form>
+
+  <section class="run" id="run" hidden aria-live="polite">
+    <div class="run-head">
+      <h2 id="run-title"></h2>
+      <span class="hint" id="run-status"></span>
+    </div>
+    <ol class="stages" id="stages">
+      <li>Starting</li>
+      <li>Getting ready</li>
+      <li>Exploring, writing and testing</li>
+      <li>Saving</li>
+      <li>Ready</li>
+    </ol>
+    <p class="run-link" id="run-link"></p>
+    <div class="trace" id="trace" role="log" hidden></div>
+    <div id="result"></div>
+  </section>
+
+  <section class="apis">
+    <h2>Your APIs</h2>
+    <div id="apis"><p class="empty">Loading…</p></div>
+  </section>
+</main>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const CFG = "apiforge.github";
+  const WORKFLOW = "forge.yml";
+  const STAGE_BY_STEP = {
+    "Get the code": 1, "Set up Python": 1, "Install apiforge and a browser": 1,
+    "Build the API": 2, "Save the API to the repo": 3, "Report": 3,
+  };
+  let cfg = loadCfg();
+  let defaultBranch = "main";
+  let pollTimer = null;
+
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const slugify = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const normUrl = (u) => (/^[a-z]+:\/\//i.test(u) ? u : "https://" + u).trim();
+
+  function loadCfg() {
+    try { return JSON.parse(localStorage.getItem(CFG)) || {}; } catch { return {}; }
+  }
+  function saveCfg(c) { try { localStorage.setItem(CFG, JSON.stringify(c)); } catch {} }
+  function guessRepo() {
+    const h = location.hostname, seg = location.pathname.split("/").filter(Boolean);
+    return h.endsWith(".github.io") && seg[0] ? `${h.split(".")[0]}/${seg[0]}` : "";
+  }
+
+  async function gh(path, opts = {}) {
+    const res = await fetch(`https://api.github.com/repos/${cfg.repo}${path}`, {
+      cache: "no-store",
+      ...opts,
+      headers: {
+        Accept: opts.raw ? "application/vnd.github.raw+json" : "application/vnd.github+json",
+        Authorization: `Bearer ${cfg.token}`,
+        "X-GitHub-Api-Version": "2022-11-28",
+        ...(opts.body ? { "Content-Type": "application/json" } : {}),
+      },
+    });
+    if (res.status === 401) { showGate("GitHub didn’t accept that token. Create a new one and try again."); throw new Error("Token rejected"); }
+    if (res.status === 403 || (res.status === 404 && path.includes("/dispatches"))) {
+      const b = await res.json().catch(() => ({}));
+      throw new Error(`GitHub refused: ${b.message || res.status}. Check the token has Actions: Read and write and Contents: Read for ${cfg.repo}.`);
+    }
+    if (res.status === 404) { const e = new Error("Not found"); e.status = 404; throw e; }
+    if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || `GitHub error ${res.status}`); }
+    if (res.status === 204) return null;
+    return opts.raw ? res.text() : res.json();
+  }
+  const file = (path) => gh(`/contents/${path}?ref=${encodeURIComponent(defaultBranch)}`, { raw: true });
+
+  // ---------- connect ----------
+  function showGate(message) {
+    $("gate").hidden = false;
+    $("settings-btn").hidden = true;
+    $("cfg-repo").value = cfg.repo || guessRepo();
+    $("cfg-token").value = "";
+    $("gate-error").hidden = !message;
+    $("gate-error").textContent = message || "";
+  }
+  $("settings-btn").onclick = () => showGate("");
+  $("cfg-save").onclick = async () => {
+    const repo = $("cfg-repo").value.trim().replace(/^https:\/\/github\.com\//, "").replace(/\/$/, "");
+    const token = $("cfg-token").value.trim() || cfg.token;
+    if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) return showGate("Enter the repository as owner/name, for example your-name/apiforge.");
+    if (!token) return showGate("Paste a GitHub token.");
+    cfg = { repo, token };
+    try {
+      const info = await gh("");
+      defaultBranch = info.default_branch || "main";
+    } catch (err) {
+      return showGate(err.status === 404 ? `Couldn’t find ${repo}, or the token can’t see it.` : err.message);
+    }
+    saveCfg(cfg);
+    $("gate").hidden = true;
+    $("settings-btn").hidden = false;
+    boot();
+  };
+
+  // ---------- copy ----------
+  async function copy(text, btn) {
+    try { await navigator.clipboard.writeText(text); }
+    catch {
+      const ta = Object.assign(document.createElement("textarea"), { value: text });
+      document.body.append(ta); ta.select(); document.execCommand("copy"); ta.remove();
+    }
+    if (btn) { const old = btn.textContent; btn.textContent = "Copied"; setTimeout(() => (btn.textContent = old), 1400); }
+  }
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-copy]");
+    if (b) copy(b.getAttribute("data-copy"), b);
+  });
+  const copyRow = (value) =>
+    `<div class="copyrow"><code>${esc(value)}</code><button type="button" data-copy="${esc(value)}">Copy</button></div>`;
+
+  // ---------- build ----------
+  $("forge").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    $("form-error").hidden = true;
+    const raw = $("url").value.trim();
+    if (!raw) { $("url").focus(); return formError("Paste the website address first."); }
+    const url = normUrl(raw);
+    let host;
+    try { host = new URL(url).hostname; } catch { return formError("That doesn’t look like a website address."); }
+    const name = slugify($("name").value) || slugify(host.replace(/^www\./, ""));
+    $("go").disabled = true;
+    const startedAt = Date.now();
+    try {
+      await gh(`/actions/workflows/${WORKFLOW}/dispatches`, {
+        method: "POST",
+        body: JSON.stringify({ ref: defaultBranch, inputs: { url, goal: $("goal").value.trim(), name, max_steps: "30" } }),
+      });
+      try { sessionStorage.setItem("apiforge.pending", JSON.stringify({ name, startedAt })); } catch {}
+      watch(name, startedAt);
+    } catch (err) {
+      formError(err.message);
+      $("go").disabled = false;
+    }
+  });
+  function formError(m) { $("form-error").textContent = m; $("form-error").hidden = false; }
+
+  function renderStages(current, failed) {
+    document.querySelectorAll("#stages li").forEach((li, i) => {
+      li.className = i < current ? "done" : i === current ? (failed ? "failed" : current >= 4 ? "done" : "active") : "";
+    });
+  }
+
+  async function findRun(name, startedAt) {
+    const data = await gh(`/actions/workflows/${WORKFLOW}/runs?event=workflow_dispatch&per_page=15`);
+    return (data.workflow_runs || []).find((r) =>
+      new Date(r.created_at).getTime() >= startedAt - 60000 && (r.display_title || "").startsWith(`Build ${name} from`));
+  }
+
+  function watch(name, startedAt, runId = null) {
+    clearTimeout(pollTimer);
+    $("run").hidden = false;
+    $("run-title").textContent = name;
+    $("result").innerHTML = "";
+    $("trace").hidden = true;
+    $("run-link").innerHTML = "";
+    renderStages(0, false);
+    $("run-status").textContent = "Starting on GitHub";
+    const tick = async () => {
+      try {
+        if (!runId) {
+          const run = await findRun(name, startedAt);
+          if (!run) { pollTimer = setTimeout(tick, 4000); return; }
+          runId = run.id;
+        }
+        const run = await gh(`/actions/runs/${runId}`);
+        $("run-link").innerHTML = `<a href="${esc(run.html_url)}" target="_blank" rel="noopener">Follow the full log on GitHub</a>`;
+        const jobs = await gh(`/actions/runs/${runId}/jobs`);
+        const steps = (jobs.jobs?.[0]?.steps) || [];
+        let stage = 0, failedStep = null;
+        for (const s of steps) {
+          const idx = STAGE_BY_STEP[s.name];
+          if (idx === undefined) continue;
+          if (s.status === "in_progress" || s.status === "completed") stage = Math.max(stage, idx);
+          if (s.conclusion === "failure" && !failedStep) failedStep = s;
+        }
+        const mins = Math.max(0, Math.round((Date.now() - new Date(run.run_started_at || run.created_at)) / 60000));
+        if (run.status !== "completed") {
+          $("run-status").textContent = run.status === "queued" ? "Waiting for a GitHub runner" : `Working, ${mins} min so far`;
+          renderStages(run.status === "queued" ? 0 : Math.max(stage, 1), false);
+          pollTimer = setTimeout(tick, 6000);
+          return;
+        }
+        try { sessionStorage.removeItem("apiforge.pending"); } catch {}
+        $("go").disabled = false;
+        await finish(name, run, startedAt);
+        loadApis();
+      } catch (err) {
+        $("run-status").textContent = err.message;
+        pollTimer = setTimeout(tick, 8000);
+      }
+    };
+    tick();
+  }
+
+  async function finish(name, run, startedAt) {
+    let meta = null, log = "";
+    try { meta = JSON.parse(await file(`apis/${name}/apiforge.json`)); } catch {}
+    try { log = await file(`apis/${name}/build.log`); } catch {}
+    const fresh = meta && new Date(meta.built_at).getTime() >= startedAt - 120000;
+    if (log) {
+      const lines = log.split("\n").filter((l) => l.trim() && !/^Done: /.test(l)).slice(-200);
+      $("trace").innerHTML = lines.map((l) => `<div class="${classify(l)}">${esc(l.replace(/^\s+step \d+: /, ""))}</div>`).join("");
+      $("trace").hidden = false;
+      $("trace").scrollTop = $("trace").scrollHeight;
+    }
+    if (!fresh) {
+      renderStages(2, true);
+      $("run-status").textContent = "Failed";
+      const reason = run.conclusion === "cancelled" ? "The run was cancelled." :
+        (log.match(/^Error: .*$/m)?.[0] || "The build stopped before writing an API. The log above and on GitHub says why.");
+      $("result").innerHTML = `<div class="error"><strong>No API was built.</strong> ${esc(reason)}<br>
+        Sites that block automated browsers, need a login, or render everything on the server can’t be turned into an API this way.</div>`;
+      return;
+    }
+    renderStages(4, false);
+    $("run-status").textContent = "Finished";
+    await renderResult(meta);
+    $("result").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+  }
+
+  function classify(line) {
+    if (/^\s+(GET|POST|PUT|PATCH|DELETE)\s/.test(line)) return "found";
+    if (/^PASS /.test(line)) return "pass";
+    if (/^FAIL |Traceback|^Error/.test(line)) return "fail";
+    if (/^(Found|Generating|Running|Asking|Agent finished|Actions:)/.test(line)) return "note";
+    return "act";
+  }
+
+  function exampleParams(detail) {
+    const out = {};
+    for (const p of detail.params || []) {
+      if ("default" in p) out[p.name] = p.default;
+      else out[p.name] = p.type === "int" ? 1 : p.type === "bool" ? true : "VALUE";
+    }
+    return out;
+  }
+
+  async function renderResult(meta) {
+    const name = meta.name;
+    const verified = meta.status === "verified";
+    const details = meta.action_details?.length ? meta.action_details
+      : (meta.actions || []).map((a) => ({ action: a, description: "", params: [] }));
+    const first = details[0];
+    const example = first ? { action: first.action, params: exampleParams(first) } : { action: "help" };
+    const exampleJson = JSON.stringify(example, null, 2);
+    const curlBody = JSON.stringify({ "json-input": example });
+    const curl = `curl -X POST "https://api.YOUR-HUB/deployments/rest:YOUR-ID/execution" \\\n  -u "APP-PASSWORD-ID:APP-PASSWORD" \\\n  -H "content-type: application/json" \\\n  -d '${curlBody}'`;
+    const fileUrl = `https://github.com/${cfg.repo}/blob/${defaultBranch}/apis/${name}/knime_node.py`;
+    $("result").innerHTML = `
+      <div class="result${verified ? "" : " warn"}">
+        <h3>${verified ? "Your API is ready" : "Your API is ready, but its live tests failed"}</h3>
+        <p>${verified ? "It passed its tests against the real site." : "Some actions may not work yet. Check the log above, then rebuild with a more specific goal."}</p>
+        <div class="btnrow">
+          <button type="button" class="primary" id="copy-script">Copy the KNIME script</button>
+          <a class="hint" href="${esc(fileUrl)}" target="_blank" rel="noopener" style="align-self:center">View it on GitHub</a>
+        </div>
+        <div class="kv"><span>Actions</span></div>
+        <div class="actions-list">${details.map((d) => {
+          const body = JSON.stringify({ action: d.action, params: exampleParams(d) });
+          return `<div class="action"><div class="an">${esc(d.action)}</div>${d.description ? `<p>${esc(d.description)}</p>` : ""}${copyRow(body)}</div>`;
+        }).join("") || `<p class="empty">No actions found.</p>`}</div>
+        <details open>
+          <summary>Run it as a KNIME service</summary>
+          <ol class="steps-knime">
+            <li>In KNIME, connect four nodes: <strong>Container Input (JSON)</strong>, <strong>Python Script</strong>, <strong>String to JSON</strong>, <strong>Container Output (JSON)</strong>.</li>
+            <li>In Container Input (JSON), paste an example request as the default:<pre>${esc(exampleJson)}</pre></li>
+            <li>In Python Script, replace the starter code with the script you copied. KNIME’s bundled Python is enough.</li>
+            <li>In String to JSON, convert the <code>response</code> column. Run the workflow to check the output.</li>
+            <li>Upload it to KNIME Hub, create a version, then choose Deploy, then Create service. The deployment page shows your endpoint.</li>
+            <li>Create an application password in your KNIME Hub profile. That’s the credential your automations use.</li>
+          </ol>
+        </details>
+        <details>
+          <summary>Call the KNIME service</summary>
+          <p class="hint">The top-level key must match the Parameter name in Container Input (JSON), which is <code>json-input</code> by default. Send <code>{"action": "help"}</code> to list every action and its parameters.</p>
+          <pre>${esc(curl)}</pre>
+          <button type="button" data-copy="${esc(curl)}">Copy</button>
+        </details>
+      </div>`;
+    $("copy-script").onclick = async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      try { await copy(await file(`apis/${name}/knime_node.py`), btn); }
+      catch (err) { formError(`Couldn’t load the script: ${err.message}`); }
+      finally { btn.disabled = false; }
+    };
+  }
+
+  // ---------- APIs list ----------
+  async function loadApis() {
+    let entries;
+    try { entries = await gh(`/contents/apis?ref=${encodeURIComponent(defaultBranch)}`); }
+    catch (err) {
+      $("apis").innerHTML = err.status === 404
+        ? `<p class="empty">No APIs yet. Paste a website above to build your first one.</p>`
+        : `<p class="empty">${esc(err.message)}</p>`;
+      return;
+    }
+    const dirs = (entries || []).filter((e) => e.type === "dir");
+    const metas = (await Promise.all(dirs.map(async (d) => {
+      try { return JSON.parse(await file(`apis/${d.name}/apiforge.json`)); } catch { return null; }
+    }))).filter(Boolean).sort((a, b) => (b.built_at || "").localeCompare(a.built_at || ""));
+    if (!metas.length) { $("apis").innerHTML = `<p class="empty">No APIs yet. Paste a website above to build your first one.</p>`; return; }
+    $("apis").innerHTML = metas.map((m) => `
+      <div class="api-row">
+        <div class="name">${esc(m.name)}<span class="badge ${m.status === "verified" ? "ok" : "bad"}">${m.status === "verified" ? "Tested" : "Tests failing"}</span></div>
+        <div class="meta">${esc((m.actions || []).join(", ") || "no actions")}<br>${esc(m.start_url || "")}</div>
+        <div class="btns">
+          <button type="button" data-show="${esc(m.name)}">Details</button>
+          <button type="button" data-rebuild="${esc(m.name)}">Rebuild</button>
+        </div>
+      </div>`).join("");
+    $("apis").onclick = (e) => {
+      const show = e.target.closest("[data-show]"), rb = e.target.closest("[data-rebuild]");
+      const m = metas.find((x) => x.name === (show || rb)?.getAttribute(show ? "data-show" : "data-rebuild"));
+      if (!m) return;
+      if (show) {
+        $("run").hidden = false; $("run-title").textContent = m.name; $("run-status").textContent = `Built ${new Date(m.built_at).toLocaleString()}`;
+        $("run-link").innerHTML = ""; $("trace").hidden = true; renderStages(4, false);
+        renderResult(m).then(() => $("run").scrollIntoView({ block: "start" }));
+      } else {
+        $("url").value = m.start_url || ""; $("goal").value = m.goal || ""; $("name").value = m.name;
+        $("forge").scrollIntoView({ block: "start" }); $("go").focus();
+      }
+    };
+  }
+
+  // ---------- start ----------
+  async function boot() {
+    if (!cfg.repo || !cfg.token) { showGate(""); $("apis").innerHTML = `<p class="empty">Connect your repo to see your APIs.</p>`; return; }
+    $("settings-btn").hidden = false;
+    try { defaultBranch = (await gh("")).default_branch || "main"; } catch (err) { if (err.status === 404) return showGate(`Couldn’t find ${cfg.repo}, or the token can’t see it.`); }
+    loadApis();
+    try {
+      const p = JSON.parse(sessionStorage.getItem("apiforge.pending") || "null");
+      if (p && Date.now() - p.startedAt < 60 * 60000) { $("go").disabled = true; watch(p.name, p.startedAt); }
+    } catch {}
+  }
+  boot();
+})();
+</script>
+</body>
+</html>

@@ -1,43 +1,49 @@
 import json
 
+from apiforge.generate import write_service
 from apiforge.verify import run_smoke_tests
 
-APP = '''
-from fastapi import FastAPI
-app = FastAPI()
+GOOD = '''
+def search(query: str = "coffee", limit: int = 5):
+    """Matching tariff lines."""
+    return [{"code": "0901.11", "query": query}][:limit]
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
-
-@app.get("/echo")
-def echo(q: str = "x"):
-    return {"q": q}
-
-@app.get("/empty")
-def empty():
+def nothing():
+    """Always empty."""
     return []
+
+ACTIONS = {"search": search, "nothing": nothing}
 '''
 
 
-def _service(tmp_path, tests):
-    (tmp_path / "main.py").write_text(APP)
-    (tmp_path / "smoke_tests.json").write_text(json.dumps(tests))
+def _service(tmp_path, code, tests):
+    write_service(tmp_path, {"service.py": code, "smoke_tests.json": json.dumps(tests), "README.md": "x"})
     return tmp_path
 
 
 def test_passing_service(tmp_path):
-    ok, log = run_smoke_tests(_service(tmp_path, [{"path": "/echo", "params": {"q": "hi"}}]))
+    ok, log = run_smoke_tests(_service(tmp_path, GOOD, [{"action": "search", "params": {"query": "tea"}}]))
     assert ok, log
+    assert "PASS search" in log and '"query": "tea"' in log
 
 
-def test_empty_response_fails(tmp_path):
-    ok, log = run_smoke_tests(_service(tmp_path, [{"path": "/empty"}]))
-    assert not ok and "empty" in log.lower()
+def test_empty_result_fails(tmp_path):
+    ok, log = run_smoke_tests(_service(tmp_path, GOOD, [{"action": "nothing"}]))
+    assert not ok and "no data" in log
 
 
-def test_crash_on_startup(tmp_path):
-    (tmp_path / "main.py").write_text("raise RuntimeError('boom')")
-    (tmp_path / "smoke_tests.json").write_text("[]")
-    ok, log = run_smoke_tests(tmp_path)
+def test_unknown_action_and_bad_params_fail(tmp_path):
+    ok, log = run_smoke_tests(_service(tmp_path, GOOD, [
+        {"action": "nope"}, {"action": "search", "params": {"bogus": 1}}]))
+    assert not ok and "Unknown action" in log and "TypeError" in log
+
+
+def test_third_party_imports_are_caught(tmp_path):
+    code = "import httpx\n" + GOOD
+    ok, log = run_smoke_tests(_service(tmp_path, code, [{"action": "search"}]))
+    assert not ok and "httpx" in log and "importing" in log
+
+
+def test_crash_on_import(tmp_path):
+    ok, log = run_smoke_tests(_service(tmp_path, "raise RuntimeError('boom')\nACTIONS = {}", [{"action": "x"}]))
     assert not ok and "boom" in log

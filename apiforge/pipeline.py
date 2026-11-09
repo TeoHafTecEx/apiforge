@@ -87,7 +87,7 @@ def build(
     gen = generate.Generator(model=model) if model else generate.Generator()
     log(f"Generating service with {gen.model}...")
     files = gen.generate(slugify(name), goal, url, endpoints_json)
-    generate.write_service(out, files)
+    generate.write_service(out, files, name=slugify(name), url=url, goal=goal)
 
     # 4. Verify + repair
     status = "unverified"
@@ -106,10 +106,14 @@ def build(
                 break
             log("Asking the model to fix it...")
             files = gen.repair(result)
-            generate.write_service(out, files)
+            generate.write_service(out, files, name=slugify(name), url=url, goal=goal)
 
+    actions = _list_actions(out / "service.py")
+    action_details = _describe_actions(out / "knime_node.py")
     meta = {
         "name": slugify(name),
+        "actions": actions,
+        "action_details": action_details,
         "goal": goal,
         "start_url": url,
         "capture_mode": mode,
@@ -121,3 +125,40 @@ def build(
     (out / "apiforge.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     log(f"Done: {out}/  status={status}")
     return meta
+
+
+def _list_actions(service_py: Path) -> list[str]:
+    """Action names from the ACTIONS dict, without importing (and so running) the code."""
+    import ast
+
+    try:
+        tree = ast.parse(service_py.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError):
+        return []
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "ACTIONS" for t in node.targets):
+            if isinstance(node.value, ast.Dict):
+                return [k.value for k in node.value.keys if isinstance(k, ast.Constant)]
+    return [n.name for n in tree.body if isinstance(n, ast.FunctionDef) and not n.name.startswith("_")]
+
+
+_DESCRIBE = r"""
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("forge_service", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+print(json.dumps(mod._forge_help(), default=str))
+"""
+
+
+def _describe_actions(knime_py: Path) -> list[dict]:
+    """Each action's description and parameters, for the web page's request examples."""
+    import subprocess
+    import sys
+
+    try:
+        proc = subprocess.run([sys.executable, "-S", "-c", _DESCRIBE, str(knime_py)],
+                              capture_output=True, text=True, timeout=30)
+        return json.loads(proc.stdout) if proc.returncode == 0 else []
+    except (subprocess.TimeoutExpired, ValueError, OSError):
+        return []

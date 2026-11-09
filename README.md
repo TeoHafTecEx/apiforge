@@ -1,96 +1,84 @@
 # apiforge
 
-Paste a website into the web page, say what you need from it, and press **Build API**. An AI agent explores the site in a headless browser, records its internal API calls, writes a clean REST API on top of them, tests it against the live site, and gives you an **endpoint and an API key** to use in your automations.
+Paste a website into a page, say what you need from it, and get back a script that runs as a **KNIME service**: a REST endpoint your automations can call.
 
-```bash
-apiforge server        # then open http://localhost:8000
-```
-
-The page asks for your access key (the `FORGE_ADMIN_KEY` you set), then shows:
-
-- a form for the website, what the API should do, and an optional name
-- live progress while it works: exploring, finding the API, writing it, testing it
-- the result: endpoint, API key (shown once, with copy buttons), routes, a curl example and KNIME instructions
-- your APIs, with a button to issue a new key for any of them
-
-Everything the page does is also available over HTTP for scripts and KNIME workflows:
-
-```bash
-curl -X POST http://localhost:8000/forge \
-  -H "x-admin-key: $FORGE_ADMIN_KEY" -H "content-type: application/json" \
-  -d '{"url": "https://hts.usitc.gov", "goal": "Search HTS codes by keyword or number and return duty rates"}'
-# → {"job_id": "3f2a9c1b7e04", "status_url": ".../forge/jobs/3f2a9c1b7e04"}
-# poll status_url until "status" is "done"; "result" holds endpoint, api_key, routes, docs
-```
+An AI agent explores the site in a headless browser, records the site's internal API calls, writes a small module around them, and tests it against the live site. Everything runs on GitHub, and the result runs in KNIME with nothing extra to install.
 
 ## How it works
 
-1. **Explore (agent).** An AI model drives headless Chromium with HAR recording on. After every click or search it sees the page plus the API calls that action triggered, so it steers toward the features the goal needs: several searches with different values, detail pages, filters, pagination. It is told to stay read-only: no logins, purchases, posts, or CAPTCHA solving.
-2. **Filter.** `har.py` drops assets and trackers, groups calls into endpoint templates (`/items/123` → `/items/{id}`), redacts cookies and auth headers, and trims bodies.
-3. **Generate.** The model writes `upstream.py` (talks to the site) and `main.py` (your API, designed around the goal), plus smoke tests and docs. Only whitelisted filenames are written.
-4. **Verify and repair.** The service boots and its smoke tests run against the live site. Crashes, wrong status codes or empty results go back to the model with the server log, up to 2 times.
-5. **Serve.** The forge server mounts every API at `/api/<name>` with its own key, so new APIs go live without a redeploy.
+1. **The page** (GitHub Pages, in `docs/`) takes a website, a goal and a name, and starts a build.
+2. **GitHub Actions** (`.github/workflows/forge.yml`) runs the build on a temporary machine:
+   - the agent explores the site with headless Chromium while every request is recorded
+   - the recording is filtered and redacted (no cookies or tokens reach the model)
+   - the model writes `service.py`, using only Python's standard library
+   - the result is tested against the live site, using no third-party packages at all, and repaired automatically if a test fails
+3. **The repo** gets the result in `apis/<name>/`. The file that matters is `knime_node.py`: the service plus a fixed adapter, ready to paste into a Python Script node.
+4. **KNIME** runs it. Deploy the workflow as a service on KNIME Hub and it becomes a REST endpoint with KNIME's own credentials.
+
+## One-time setup (all on github.com)
+
+1. **Upload the code.** Create a repo and upload everything in this folder except `.git`. On a Mac, press Cmd+Shift+. in Finder to see the dot-folders; `.github` must be included.
+2. **Add your model key.** Settings → Secrets and variables → Actions → New repository secret: `OPENAI_API_KEY` (or `ANTHROPIC_API_KEY`). To pick a model, add a variable (same page, Variables tab) named `APIFORGE_MODEL`.
+3. **Turn on the page.** Settings → Pages → Build and deployment: Deploy from a branch, branch `main`, folder `/docs`. After a minute it's live at `https://<you>.github.io/<repo>/`.
+4. **Create a token for the page.** Settings (your profile) → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token. Repository access: only this repo. Permissions: **Actions: Read and write**, **Contents: Read-only**.
+5. **Open the page**, enter the repo and token, and build your first API.
+
+If the first build fails at the saving step, go to Settings → Actions → General → Workflow permissions and choose Read and write permissions.
+
+You can also start a build without the page: Actions tab → forge → Run workflow.
+
+## Running it in KNIME
+
+The page shows these steps with your API's own examples once a build finishes.
+
+1. Connect four nodes: **Container Input (JSON)** → **Python Script** → **String to JSON** → **Container Output (JSON)**.
+2. In Container Input (JSON), set an example request as the default, e.g. `{"action": "search", "params": {"query": "coffee"}}`.
+3. In Python Script, replace the starter code with `knime_node.py`. KNIME's bundled Python is enough.
+4. In String to JSON, convert the `response` column. Run the workflow to check the output.
+5. Upload the workflow to KNIME Hub, create a version, then Deploy → Create service.
+6. Create an application password in your KNIME Hub profile for your automations.
+
+Call it:
+
+```bash
+curl -X POST "https://api.<your-hub>/deployments/rest:<id>/execution" \
+  -u "<app-password-id>:<app-password>" \
+  -H "content-type: application/json" \
+  -d '{"json-input": {"action": "search", "params": {"query": "coffee"}}}'
+```
+
+The top-level key matches the Parameter name in Container Input (JSON) (`json-input` by default). Every response is `{"ok": true, "action": ..., "count": n, "data": ...}` or `{"ok": false, "error": "..."}`. Send `{"action": "help"}` to list the actions and their parameters.
+
+One workflow serves every action of that API. Build one workflow per API.
+
+**Secrets for sites behind a login:** if an API's README lists `UPSTREAM_...` values, create flow variables with those names (from a Credentials Configuration node, for example) and the script passes them through.
+
+## Running builds locally (optional)
+
+```bash
+pip install -e ".[dev]" && playwright install chromium
+export OPENAI_API_KEY=sk-...
+apiforge build hts-tariffs --url https://hts.usitc.gov --goal "Search HTS codes and duty rates"
+apiforge run hts-tariffs help                                   # exactly what KNIME runs
+apiforge run hts-tariffs search --params '{"query": "coffee"}'
+apiforge test hts-tariffs                                       # re-run the live checks
+```
+
+Local-only options: `--show` to watch the agent's browser, `--mode manual` to browse yourself, `--profile ./browser-profile` to reuse a logged-in session, `--har file.har` to reuse a recording.
 
 ## Choosing a model provider
 
-apiforge works with **OpenAI** or **Anthropic**. Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`; if both are set, pick with `APIFORGE_PROVIDER=openai|anthropic`. Override the model with `APIFORGE_MODEL` (defaults: `gpt-5.6-sol` / `claude-sonnet-5-5`). The model must support tool calling, and strong coding models give noticeably better APIs. `OPENAI_BASE_URL` points it at any OpenAI-compatible endpoint (Azure OpenAI, OpenRouter, a local model).
-
-## Run it
-
-```bash
-git clone https://github.com/<you>/apiforge && cd apiforge
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]" && playwright install chromium
-cp .env.example .env   # fill in, then: set -a; source .env; set +a
-
-apiforge server                          # forge server on :8000 (POST /forge, /api/<name>/...)
-```
-
-Or from the command line without the server:
-
-```bash
-apiforge build hts-tariffs --url https://hts.usitc.gov --goal "Search HTS codes and duty rates"
-apiforge build hts-tariffs ... --show            # watch the agent's browser
-apiforge build my-site ... --mode manual         # you browse instead of the agent
-apiforge build my-site ... --profile ./browser-profile   # reuse a logged-in session
-apiforge serve hts-tariffs                       # run one API alone (docs at /docs)
-apiforge test hts-tariffs                        # re-run live checks (catches site changes)
-apiforge list
-```
-
-## Deploy the forge server
-
-The web page is served by the forge server itself, so wherever the server runs, the page is at its root address. The root `Dockerfile` includes Chromium. It needs a persistent volume at `/data` (generated APIs and key hashes live there) and these env vars: `OPENAI_API_KEY` (or `ANTHROPIC_API_KEY`), `FORGE_ADMIN_KEY`, `PUBLIC_URL`.
-
-```bash
-docker build -t apiforge .
-docker run -p 8000:8000 -v apiforge-data:/data --env-file .env apiforge
-```
-
-Any host that runs a Docker container or Python works: a company server, a VM on AWS/Azure/Google Cloud, or a PaaS. Attach persistent storage at `/data`, set the env vars, and give it at least 2 GB of RAM for the browser. Put it behind HTTPS before using it over the internet, since keys travel in headers. Each generated API also has its own Dockerfile in `apis/<name>/` if you'd rather deploy one standalone.
-
-## Using it from KNIME
-
-- **Call an API:** add a **GET Request** node with the URL `https://<server>/api/<name>/<route>?…`, and on its Request Headers tab add `x-api-key` with your key. Feed the response into **JSON to Table**.
-- **Forge a new API from a workflow:** a **POST Request** node to `/forge` with the JSON body above and header `x-admin-key`, then poll `status_url` with a GET Request node in a loop until `status` is `done`, and read `endpoint` and `api_key` from the result.
-- Store keys in KNIME credentials (Credentials Configuration node) rather than typing them into node settings.
+Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. If both are set, choose with `APIFORGE_PROVIDER=openai|anthropic`. `APIFORGE_MODEL` overrides the default model (`gpt-5.6-sol` / `claude-sonnet-5-5`); it must support tool calling. `OPENAI_BASE_URL` points it at Azure OpenAI, OpenRouter or another OpenAI-compatible endpoint.
 
 ## Things to know
 
-- **Check for an official API first.** For US tariffs, the USITC has a public REST endpoint (`hts.usitc.gov/reststop/...`) that the site itself uses, so the agent should land on it directly.
-- **Not every site works headless.** Sites with heavy bot protection (CAPTCHAs, Cloudflare challenges) will block the agent; the job log says so. Sites that render everything server-side have no JSON API to find.
-- **Logins.** The agent never logs in. For sites behind a login, log in once with `--mode manual --profile ./browser-profile`, then build with the same `--profile`. Upstream secrets go in env vars (`UPSTREAM_COOKIE`, etc.) and are never written into code.
-- **Sites change.** Run `apiforge test <name>` on a schedule and rebuild when it fails.
-- **Respect site terms.** Some platforms (LinkedIn especially) ban automated access and sue scrapers.
-- **Captures contain personal data** and are git-ignored; keep it that way. Review generated code before relying on it.
-- **Jobs live in memory**, so job status is lost on restart (the built APIs and keys persist).
-
-## Roadmap
-
-- Scheduled health checks with automatic rebuild when an API breaks.
-- Change tracking: store responses over time and expose `/changes` (useful for tariff updates).
-- Web UI for forging and managing APIs.
-- A KNIME component that wraps forge + poll into one node.
+- **Public repo, public results.** In a public repo, the generated code and build logs are visible to anyone. A private repo keeps them private, but GitHub Pages for private repos needs a paid GitHub plan.
+- **KNIME Hub plan.** Service deployments need a KNIME Hub plan that runs workflows; check that yours includes them. Without one, you can still use the script inside your own workflows.
+- **Check for an official API first.** For US tariffs, the USITC publishes a public REST endpoint (`hts.usitc.gov/reststop/...`) that its own site uses, so the agent should land on it directly.
+- **Not every site works.** Sites with CAPTCHAs or heavy bot protection block the agent. Sites that render everything server-side have no JSON API to find. The agent never logs in, buys, posts, or solves CAPTCHAs.
+- **Sites change.** Rebuild from the page's API list when an API stops working, or run `apiforge test <name>` on a schedule.
+- **Respect site terms.** Some platforms (LinkedIn especially) prohibit automated access and pursue scrapers legally.
+- **Browser recordings stay off GitHub.** `capture.har` holds everything the browser saw and is git-ignored. Build logs are committed and include sample data.
 
 ## Development
 
@@ -98,6 +86,6 @@ Any host that runs a Docker container or Python works: a company server, a VM on
 pytest -q
 ```
 
-Tests run the agent against a local site in real headless Chromium (with the model scripted), plus HAR filtering and redaction, the file whitelist, the live smoke-test runner, the full build pipeline with a repair round, and the forge server (mounting, per-API keys, the job flow).
+Tests cover the agent in real headless Chromium against a local site (with the model scripted), HAR filtering and redaction, both model providers' wire formats, the stdlib-only live test runner, the KNIME adapter against a stand-in KNIME API, the full build pipeline with a repair round, and the contract between the workflow and the page.
 
 MIT licensed.

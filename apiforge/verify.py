@@ -1,86 +1,68 @@
-"""Boot the generated service for real and hit it. Failures feed the repair loop."""
+"""Run the generated KNIME script for real and call its actions. Failures feed the repair loop.
+
+It runs exactly the file that gets pasted into KNIME (knime_node.py), in a separate Python
+started with -S, so site-packages are invisible: any third-party import fails here just as it
+would in a bare KNIME environment.
+"""
 from __future__ import annotations
 
 import json
-import socket
 import subprocess
 import sys
-import time
 from pathlib import Path
 
-import httpx
+RUNNER = r"""
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("forge_service", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+for t in json.load(open(sys.argv[2], encoding="utf-8")):
+    res = mod._forge_handle({"action": t.get("action"), "params": t.get("params") or {}})
+    print("@@RESULT " + json.dumps({"test": t, "response": res}, default=str), flush=True)
+"""
 
 
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-def run_smoke_tests(service_dir: Path, boot_timeout: float = 20.0) -> tuple[bool, str]:
+def run_smoke_tests(service_dir: Path, timeout: float = 300.0) -> tuple[bool, str]:
     """Return (passed, log). The log is what the model sees when asked to repair."""
-    port = _free_port()
-    base = f"http://127.0.0.1:{port}"
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "main:app", "--port", str(port)],
-        cwd=service_dir,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
-    log: list[str] = []
-    passed = True
+    script = service_dir / "knime_node.py"
+    tests_file = service_dir / "smoke_tests.json"
     try:
-        deadline = time.time() + boot_timeout
-        while True:
-            if proc.poll() is not None:
-                return False, "Service crashed on startup:\n" + (proc.stdout.read() if proc.stdout else "")
-            try:
-                if httpx.get(f"{base}/health", timeout=2).status_code == 200:
-                    break
-            except httpx.HTTPError:
-                pass
-            if time.time() > deadline:
-                return False, "Service did not answer /health within the timeout."
-            time.sleep(0.4)
+        tests = json.loads(tests_file.read_text(encoding="utf-8"))
+        if not isinstance(tests, list) or not tests:
+            return False, "smoke_tests.json must be a non-empty JSON list."
+    except (OSError, ValueError) as exc:
+        return False, f"smoke_tests.json is missing or not valid JSON: {exc}"
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-S", "-c", RUNNER, str(script), str(tests_file)],
+            capture_output=True, text=True, timeout=timeout, cwd=service_dir,
+        )
+    except subprocess.TimeoutExpired:
+        return False, f"The smoke tests took longer than {timeout:.0f}s. Add timeouts or reduce page sizes."
 
-        try:
-            tests = json.loads((service_dir / "smoke_tests.json").read_text())
-        except (OSError, ValueError) as exc:
-            return False, f"smoke_tests.json is missing or not valid JSON: {exc}"
+    log, passed, seen = [], True, 0
+    for line in proc.stdout.splitlines():
+        if not line.startswith("@@RESULT "):
+            continue
+        seen += 1
+        item = json.loads(line[len("@@RESULT "):])
+        t, res = item["test"], item["response"]
+        label = f"{t.get('action')} {json.dumps(t.get('params') or {})}"
+        if not res.get("ok"):
+            passed = False
+            log.append(f"FAIL {label}\n  {res.get('error')}")
+            continue
+        data = res.get("data")
+        if data in (None, [], {}, ""):
+            passed = False
+            log.append(f"FAIL {label}\n  Returned no data (usually a parsing or parameter bug).")
+            continue
+        sample = data[0] if isinstance(data, list) else data
+        what = f"{len(data)} items" if isinstance(data, list) else "1 item"
+        log.append(f"PASS {label} -> {what}\n  {json.dumps(sample, default=str)[:300]}")
 
-        for t in tests:
-            method = t.get("method", "GET").upper()
-            path = t.get("path", "/")
-            expect = t.get("expect_status", 200)
-            try:
-                r = httpx.request(
-                    method, base + path, params=t.get("params"), json=t.get("body"), timeout=60
-                )
-            except httpx.HTTPError as exc:
-                passed = False
-                log.append(f"FAIL {method} {path}: request error {exc!r}")
-                continue
-            body = r.text[:800]
-            ok = r.status_code == expect
-            if ok and "json" in r.headers.get("content-type", ""):
-                try:
-                    data = r.json()
-                    ok = data not in (None, [], {})  # empty output usually means a parsing bug
-                    if not ok:
-                        body = "Response was empty: " + body
-                except ValueError:
-                    ok = False
-            passed &= ok
-            log.append(f"{'PASS' if ok else 'FAIL'} {method} {path} {t.get('params') or ''} "
-                       f"-> {r.status_code} (expected {expect})\n  {body}")
-    finally:
-        proc.terminate()
-        try:
-            out, _ = proc.communicate(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            out, _ = proc.communicate()
-        if not passed and out:
-            log.append("SERVER LOG (tail):\n" + out[-4000:])
+    if proc.returncode != 0 or seen < len(tests):
+        passed = False
+        err = (proc.stderr or "").strip()[-3000:]
+        log.append("The script crashed" + (" while importing" if seen == 0 else "") + ":\n" + err)
     return passed, "\n".join(log)

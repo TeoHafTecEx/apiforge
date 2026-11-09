@@ -4,20 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apiforge"
-version = "0.4.0"
-description = "Browse a website once, get a deployable REST API for it."
+version = "0.5.0"
+description = "Point at a website, get an API you can run as a KNIME service."
 requires-python = ">=3.11"
 dependencies = [
   "anthropic>=0.40",
   "openai>=1.40",
-  "httpx>=0.27",
-  "fastapi>=0.110",
-  "uvicorn[standard]>=0.29",
   "playwright>=1.44",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "pandas>=2", "pyyaml>=6"]
 
 [project.scripts]
 apiforge = "apiforge.cli:main"
@@ -26,4 +23,4 @@ apiforge = "apiforge.cli:main"
 packages = ["apiforge"]
 
 [tool.setuptools.package-data]
-apiforge = ["templates/*", "templates/.dockerignore", "static/*"]
+apiforge = ["templates/*"]
