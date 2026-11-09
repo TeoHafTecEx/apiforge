@@ -24,11 +24,15 @@ curl "https://forge.example.com/api/hts-tariffs/search?q=coffee" -H "x-api-key: 
 
 ## How it works
 
-1. **Explore (agent).** Claude drives headless Chromium with HAR recording on. After every click or search it sees the page plus the API calls that action triggered, so it steers toward the features the goal needs: several searches with different values, detail pages, filters, pagination. It is told to stay read-only: no logins, purchases, posts, or CAPTCHA solving.
+1. **Explore (agent).** An AI model drives headless Chromium with HAR recording on. After every click or search it sees the page plus the API calls that action triggered, so it steers toward the features the goal needs: several searches with different values, detail pages, filters, pagination. It is told to stay read-only: no logins, purchases, posts, or CAPTCHA solving.
 2. **Filter.** `har.py` drops assets and trackers, groups calls into endpoint templates (`/items/123` → `/items/{id}`), redacts cookies and auth headers, and trims bodies.
-3. **Generate.** Claude writes `upstream.py` (talks to the site) and `main.py` (your API, designed around the goal), plus smoke tests and docs. Only whitelisted filenames are written.
-4. **Verify and repair.** The service boots and its smoke tests run against the live site. Crashes, wrong status codes or empty results go back to Claude with the server log, up to 2 times.
+3. **Generate.** The model writes `upstream.py` (talks to the site) and `main.py` (your API, designed around the goal), plus smoke tests and docs. Only whitelisted filenames are written.
+4. **Verify and repair.** The service boots and its smoke tests run against the live site. Crashes, wrong status codes or empty results go back to the model with the server log, up to 2 times.
 5. **Serve.** The forge server mounts every API at `/api/<name>` with its own key, so new APIs go live without a redeploy.
+
+## Choosing a model provider
+
+apiforge works with **OpenAI** or **Anthropic**. Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`; if both are set, pick with `APIFORGE_PROVIDER=openai|anthropic`. Override the model with `APIFORGE_MODEL` (defaults: `gpt-5.6-sol` / `claude-sonnet-5-5`). The model must support tool calling, and strong coding models give noticeably better APIs. `OPENAI_BASE_URL` points it at any OpenAI-compatible endpoint (Azure OpenAI, OpenRouter, a local model).
 
 ## Run it
 
@@ -55,7 +59,7 @@ apiforge list
 
 ## Deploy the forge server
 
-The root `Dockerfile` includes Chromium. It needs a persistent volume at `/data` (generated APIs and key hashes live there) and these env vars: `ANTHROPIC_API_KEY`, `FORGE_ADMIN_KEY`, `PUBLIC_URL`.
+The root `Dockerfile` includes Chromium. It needs a persistent volume at `/data` (generated APIs and key hashes live there) and these env vars: `OPENAI_API_KEY` (or `ANTHROPIC_API_KEY`), `FORGE_ADMIN_KEY`, `PUBLIC_URL`.
 
 ```bash
 docker build -t apiforge .

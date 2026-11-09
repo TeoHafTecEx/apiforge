@@ -105,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--profile", help="browser profile dir, to reuse a logged-in session")
     b.add_argument("--show", action="store_true", help="show the agent's browser window")
     b.add_argument("--max-steps", type=int, default=30, help="agent action budget")
-    b.add_argument("--model", help="override the Claude model")
+    b.add_argument("--model", help="override the model (or set APIFORGE_MODEL)")
     b.add_argument("--max-repairs", type=int, default=2)
     b.add_argument("--no-verify", action="store_true")
     b.add_argument("--no-key", action="store_true", help="don't issue a forge-server API key")

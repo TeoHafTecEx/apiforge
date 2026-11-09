@@ -1,14 +1,13 @@
-"""Agent capture: Claude drives a headless browser to exercise a site's features.
+"""Agent capture: an AI model drives a headless browser to exercise a site's features.
 
 The browser layer (BrowserSession) is plain Playwright and knows nothing about the model,
-so it can be tested on its own. The loop (explore) gives Claude a few browser tools and, after
+so it can be tested on its own. The loop (explore) gives the model a few browser tools and, after
 every action, shows it the page plus which API calls that action triggered. That feedback is
 what lets it find the endpoints that matter for the goal.
 """
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Callable
 from urllib.parse import urlsplit
@@ -154,22 +153,22 @@ class BrowserSession:
 
 TOOLS = [
     {"name": "goto", "description": "Open a URL.",
-     "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
+     "parameters": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
     {"name": "click", "description": "Click an element by its id from the latest page snapshot.",
-     "input_schema": {"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]}},
+     "parameters": {"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]}},
     {"name": "type", "description": "Fill a text input by id. Set submit=true to press Enter after.",
-     "input_schema": {"type": "object", "properties": {
+     "parameters": {"type": "object", "properties": {
          "id": {"type": "integer"}, "text": {"type": "string"}, "submit": {"type": "boolean"}},
          "required": ["id", "text"]}},
     {"name": "select", "description": "Choose an option in a <select> by id.",
-     "input_schema": {"type": "object", "properties": {
+     "parameters": {"type": "object", "properties": {
          "id": {"type": "integer"}, "value": {"type": "string"}}, "required": ["id", "value"]}},
     {"name": "scroll", "description": "Scroll down (triggers infinite scroll / lazy loading).",
-     "input_schema": {"type": "object", "properties": {}}},
-    {"name": "back", "description": "Browser back.", "input_schema": {"type": "object", "properties": {}}},
+     "parameters": {"type": "object", "properties": {}}},
+    {"name": "back", "description": "Browser back.", "parameters": {"type": "object", "properties": {}}},
     {"name": "finish", "description": "Stop exploring. Call when the goal's features have triggered API calls, "
      "or if the site is blocked / needs a login you don't have.",
-     "input_schema": {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}},
+     "parameters": {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}},
 ]
 
 AGENT_SYSTEM = """You explore a website in a browser so its internal API calls get recorded. \
@@ -204,44 +203,40 @@ def explore(url: str, goal: str, har_path: Path, *, max_steps: int = 30, headles
             profile_dir: Path | None = None, model: str | None = None,
             log: Callable[[str], None] = print) -> dict:
     """Run the agent; returns {"summary", "steps", "api_calls"}. The HAR is written to har_path."""
-    from anthropic import Anthropic
+    from .llm import LLM, Turn
 
-    client = Anthropic()
-    model = model or os.getenv("APIFORGE_MODEL", "claude-sonnet-5-5")
+    llm = LLM(model=model)
+    system = AGENT_SYSTEM.format(goal=goal)
     session = BrowserSession(har_path, headless=headless, profile_dir=profile_dir)
     summary, steps = "Stopped at step limit.", 0
     try:
         first = _observation(session, session.goto(url))
-        messages: list[dict] = [{"role": "user", "content": f"Start. Current state:\n{first}"}]
+        history: list[Turn] = [Turn("user", text=f"Start. Current state:\n{first}")]
         for steps in range(1, max_steps + 1):
-            _elide_old_observations(messages)
-            resp = client.messages.create(
-                model=model, max_tokens=2000, tools=TOOLS,
-                system=AGENT_SYSTEM.format(goal=goal), messages=messages,
-            )
-            messages.append({"role": "assistant", "content": resp.content})
-            uses = [b for b in resp.content if b.type == "tool_use"]
-            if not uses:
-                messages.append({"role": "user", "content": "Use a tool, or call finish."})
+            _elide_old_observations(history)
+            reply = llm.chat(system, history, tools=TOOLS, max_tokens=2000)
+            history.append(reply)
+            if not reply.calls:
+                history.append(Turn("user", text="Use a tool, or call finish."))
                 continue
             results, finished = [], False
-            for use in uses:
-                if use.name == "finish":
-                    summary, finished = use.input.get("summary", ""), True
-                    results.append({"type": "tool_result", "tool_use_id": use.id, "content": "ok"})
+            for call in reply.calls:
+                if call.name == "finish":
+                    summary, finished = call.input.get("summary", ""), True
+                    results.append((call.id, "ok"))
                     continue
                 try:
-                    action = getattr(session, use.name)
-                    args = dict(use.input)
+                    if call.name not in ACTIONS:
+                        raise ValueError(f"unknown tool {call.name}")
+                    args = dict(call.input)
                     if "id" in args:
                         args["element_id"] = args.pop("id")
-                    outcome = action(**args)
+                    outcome = getattr(session, call.name)(**args)
                 except Exception as exc:
-                    outcome = f"Action failed: {str(exc).splitlines()[0][:200]}"
-                log(f"  step {steps}: {use.name} {json.dumps(use.input)[:100]} -> {outcome}")
-                results.append({"type": "tool_result", "tool_use_id": use.id,
-                                "content": _observation(session, outcome)})
-            messages.append({"role": "user", "content": results})
+                    outcome = f"Action failed: {str(exc).splitlines()[0][:200] if str(exc) else exc!r}"
+                log(f"  step {steps}: {call.name} {json.dumps(call.input)[:100]} -> {outcome}")
+                results.append((call.id, _observation(session, outcome)))
+            history.append(Turn("tool_results", results=results))
             if finished:
                 break
         log(f"Agent finished after {steps} steps, {session.api_calls_seen} API calls seen. {summary}")
@@ -250,18 +245,24 @@ def explore(url: str, goal: str, har_path: Path, *, max_steps: int = 30, headles
         session.close()
 
 
-def _elide_old_observations(messages: list[dict], keep_last: int = 2) -> None:
+ACTIONS = {"goto", "click", "type", "select", "scroll", "back"}
+
+
+def _elide_old_observations(history: list, keep_last: int = 2) -> None:
     """Page snapshots are big; keep only the newest few in full to bound token use."""
     seen = 0
-    for msg in reversed(messages):
-        if msg["role"] != "user" or not isinstance(msg["content"], list):
+    for turn in reversed(history):
+        if turn.role != "tool_results":
             continue
-        for block in msg["content"]:
-            if block.get("type") == "tool_result" and len(str(block.get("content", ""))) > 400:
-                seen += 1
-                if seen > keep_last:
-                    try:
-                        calls = json.loads(block["content"]).get("api_calls_triggered")
-                    except (ValueError, TypeError, AttributeError):
-                        calls = None
-                    block["content"] = json.dumps({"elided": "old page snapshot", "api_calls_triggered": calls})
+        for i in range(len(turn.results) - 1, -1, -1):
+            cid, content = turn.results[i]
+            if len(content) <= 400:
+                continue
+            seen += 1
+            if seen > keep_last:
+                try:
+                    calls = json.loads(content).get("api_calls_triggered")
+                except (ValueError, TypeError, AttributeError):
+                    calls = None
+                turn.results[i] = (cid, json.dumps({"elided": "old page snapshot",
+                                                    "api_calls_triggered": calls}))

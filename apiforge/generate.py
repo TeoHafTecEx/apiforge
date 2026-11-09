@@ -1,14 +1,12 @@
-"""Ask Claude to write the service, parse its file blocks, and write them safely to disk."""
+"""Ask the model to write the service, parse its file blocks, and write them safely to disk."""
 from __future__ import annotations
 
-import os
 import re
 import shutil
 from pathlib import Path
 
 from . import prompts
 
-DEFAULT_MODEL = os.getenv("APIFORGE_MODEL", "claude-sonnet-5-5")
 GENERATED_FILES = ("upstream.py", "main.py", "smoke_tests.json", "README.md")
 TEMPLATES = Path(__file__).parent / "templates"
 
@@ -29,27 +27,21 @@ def parse_files(text: str) -> dict[str, str]:
 class Generator:
     """Holds the conversation so repair turns keep the full capture context."""
 
-    def __init__(self, model: str = DEFAULT_MODEL, max_tokens: int = 32000):
-        from anthropic import Anthropic  # imported lazily so tests don't need a key
+    def __init__(self, model: str | None = None, max_tokens: int = 32000):
+        from .llm import LLM  # imported lazily so tests don't need a key
 
-        self.client = Anthropic()
-        self.model = model
+        self.llm = LLM(model=model)
+        self.model = f"{self.llm.provider}:{self.llm.model}"
         self.max_tokens = max_tokens
-        self.messages: list[dict] = []
+        self.history: list = []
 
     def _ask(self, content: str) -> str:
-        self.messages.append({"role": "user", "content": content})
-        # Streaming avoids HTTP timeouts on long generations.
-        with self.client.messages.stream(
-            model=self.model,
-            max_tokens=self.max_tokens,
-            system=prompts.SYSTEM,
-            messages=self.messages,
-        ) as stream:
-            message = stream.get_final_message()
-        text = "".join(b.text for b in message.content if b.type == "text")
-        self.messages.append({"role": "assistant", "content": text})
-        return text
+        from .llm import Turn
+
+        self.history.append(Turn("user", text=content))
+        reply = self.llm.chat(prompts.SYSTEM, self.history, max_tokens=self.max_tokens)
+        self.history.append(reply)
+        return reply.text
 
     def generate(self, name: str, goal: str, start_url: str | None, endpoints_json: str) -> dict[str, str]:
         text = self._ask(prompts.build_user_prompt(name, goal, start_url, endpoints_json))
