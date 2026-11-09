@@ -1,0 +1,119 @@
+# Builds an API from a website. Started from the apiforge page (GitHub Pages) or from
+# Actions -> forge -> Run workflow. The result is committed to apis/<name>/ in this repo.
+name: forge
+run-name: "Build ${{ inputs.name }} from ${{ inputs.url }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: Website to turn into an API
+        required: true
+        type: string
+      goal:
+        description: What the API should do (optional)
+        required: false
+        type: string
+        default: ""
+      name:
+        description: API name (lowercase letters, numbers, hyphens)
+        required: true
+        type: string
+      max_steps:
+        description: How many actions the agent may take
+        required: false
+        type: string
+        default: "30"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: forge-${{ inputs.name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      APIFORGE_PROVIDER: ${{ vars.APIFORGE_PROVIDER }}
+      APIFORGE_MODEL: ${{ vars.APIFORGE_MODEL }}
+      # Inputs go through env vars, never pasted into scripts, so they can't inject commands.
+      FORGE_URL: ${{ inputs.url }}
+      FORGE_GOAL: ${{ inputs.goal }}
+      FORGE_NAME: ${{ inputs.name }}
+      FORGE_STEPS: ${{ inputs.max_steps }}
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install apiforge and a browser
+        run: |
+          pip install .
+          playwright install --with-deps chromium
+
+      - name: Build the API
+        id: build
+        shell: bash
+        run: |
+          if [ -z "$OPENAI_API_KEY$ANTHROPIC_API_KEY" ]; then
+            echo "::error::Add an OPENAI_API_KEY (or ANTHROPIC_API_KEY) secret under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          SLUG=$(python -c "import os; from apiforge.pipeline import slugify; print(slugify(os.environ['FORGE_NAME']))")
+          echo "slug=$SLUG" >> "$GITHUB_OUTPUT"
+          GOAL="${FORGE_GOAL:-Expose the main data and search features of this website as a clean API: searching, listing, and fetching the details of its main items.}"
+          STEPS="${FORGE_STEPS:-30}"
+          case "$STEPS" in ''|*[!0-9]*) STEPS=30 ;; esac
+          set +e
+          apiforge build "$SLUG" --url "$FORGE_URL" --goal "$GOAL" --recapture --max-steps "$STEPS" 2>&1 | tee build.log
+          CODE=${PIPESTATUS[0]}
+          set -e
+          mkdir -p "apis/$SLUG"
+          mv build.log "apis/$SLUG/build.log"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+
+      - name: Save the API to the repo
+        if: always() && steps.build.outputs.slug != ''
+        shell: bash
+        env:
+          SLUG: ${{ steps.build.outputs.slug }}
+        run: |
+          git config user.name "apiforge[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "apis/$SLUG"
+          if git diff --cached --quiet; then echo "Nothing to save."; exit 0; fi
+          git commit -m "forge: build $SLUG"
+          for i in 1 2 3; do git pull --rebase && git push && break; sleep 5; done
+
+      - name: Report
+        if: always() && steps.build.outputs.slug != ''
+        shell: bash
+        env:
+          SLUG: ${{ steps.build.outputs.slug }}
+          CODE: ${{ steps.build.outputs.code }}
+        run: |
+          META="apis/$SLUG/apiforge.json"
+          {
+            echo "## $SLUG"
+            if [ -f "$META" ]; then
+              python - "$META" <<'PY'
+          import json, sys
+          m = json.load(open(sys.argv[1]))
+          print(f"Status: **{m['status']}**  \nActions: {', '.join(m.get('actions', [])) or 'none'}")
+          PY
+              echo ""
+              echo "Paste \`apis/$SLUG/knime_node.py\` into a KNIME Python Script node. See the README for wiring it up as a REST service."
+            else
+              echo "The build stopped before writing an API. See apis/$SLUG/build.log."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "$CODE" = "0" ] || exit 1
