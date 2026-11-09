@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>apiforge</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔩</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  color-scheme: light;
+  --paper: #F2F4F1;
+  --surface: #FFFFFF;
+  --ink: #18222B;
+  --muted: #5B6872;
+  --line: #CBD3D0;
+  --amber: #A85F06;
+  --amber-soft: #F6E7D2;
+  --pine: #0B6E5F;
+  --pine-soft: #DCEFEA;
+  --red: #A3261B;
+  --red-soft: #F7E1DE;
+  --sans: "Schibsted Grotesk", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --paper: #12181D;
+    --surface: #1A2228;
+    --ink: #E6EBE8;
+    --muted: #93A1A9;
+    --line: #2C3740;
+    --amber: #E3A04A;
+    --amber-soft: #33281A;
+    --pine: #4FBFA6;
+    --pine-soft: #17302B;
+    --red: #F08A7E;
+    --red-soft: #3A1F1C;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 1rem/1.55 var(--sans);
+}
+main { max-width: 46rem; margin: 0 auto; padding: 3rem 1.25rem 5rem; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+/* header */
+.brand { font-weight: 700; font-size: 1.05rem; letter-spacing: -0.01em; margin: 0 0 2.5rem; display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+.brand button { font-weight: 500; }
+h1 { font-size: clamp(2rem, 6vw, 3.1rem); line-height: 1.05; letter-spacing: -0.035em; font-weight: 700; margin: 0 0 0.75rem; max-width: 14ch; }
+.lede { color: var(--muted); font-size: 1.1rem; margin: 0 0 2rem; max-width: 36rem; }
+
+/* form */
+.field { display: block; margin-bottom: 1.1rem; }
+.field > span { display: block; font-weight: 600; font-size: 0.95rem; margin-bottom: 0.35rem; }
+.field > small { display: block; color: var(--muted); font-size: 0.875rem; margin-top: 0.3rem; }
+input, textarea {
+  width: 100%; font: inherit; color: var(--ink); background: var(--surface);
+  border: 1.5px solid var(--line); border-radius: 6px; padding: 0.7rem 0.85rem;
+}
+input:focus, textarea:focus { border-color: var(--ink); outline: none; }
+.url-input { font-size: 1.25rem; padding: 0.95rem 1rem; font-weight: 500; }
+textarea { min-height: 5rem; resize: vertical; }
+.actions { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-top: 1.4rem; }
+button {
+  font: inherit; cursor: pointer; border-radius: 6px; border: 1.5px solid var(--ink);
+  background: transparent; color: var(--ink); padding: 0.45rem 0.85rem; font-size: 0.9rem;
+}
+button.primary { background: var(--ink); color: var(--paper); font-weight: 600; font-size: 1.05rem; padding: 0.8rem 1.5rem; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+.hint { color: var(--muted); font-size: 0.9rem; }
+.error { color: var(--red); background: var(--red-soft); padding: 0.75rem 0.9rem; border-radius: 6px; margin-top: 1rem; }
+
+/* progress: a real sequence, so it is numbered */
+section.run { margin-top: 3rem; padding-top: 2rem; border-top: 1.5px solid var(--line); }
+.run-head { display: flex; justify-content: space-between; gap: 1rem; align-items: baseline; flex-wrap: wrap; }
+.run-head h2 { margin: 0; font-size: 1.35rem; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+.stages { list-style: none; padding: 0; margin: 1.5rem 0; display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem; counter-reset: stage; }
+.stages li { counter-increment: stage; border-top: 3px solid var(--line); padding-top: 0.55rem; font-size: 0.9rem; color: var(--muted); }
+.stages li::before { content: counter(stage); font-weight: 700; margin-right: 0.35rem; }
+.stages li.done { border-color: var(--pine); color: var(--ink); }
+.stages li.active { border-color: var(--amber); color: var(--ink); font-weight: 600; }
+.stages li.failed { border-color: var(--red); color: var(--red); font-weight: 600; }
+@media (prefers-reduced-motion: no-preference) {
+  .stages li.active { animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: 0.55; } }
+}
+
+/* the trace: what the agent did and what it found */
+.trace {
+  background: var(--surface); border: 1.5px solid var(--line); border-radius: 6px;
+  max-height: 22rem; overflow: auto; padding: 0.75rem 0; font: 0.82rem/1.6 var(--mono);
+}
+.trace div { padding: 0 0.9rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.trace .act { color: var(--muted); }
+.trace .found { color: var(--pine); font-weight: 500; }
+.trace .fail { color: var(--red); }
+.trace .pass { color: var(--pine); }
+.trace .note { color: var(--ink); font-family: var(--sans); font-weight: 600; font-size: 0.9rem; padding-top: 0.5rem; }
+
+/* result */
+.result { margin-top: 2rem; border: 2px solid var(--pine); border-radius: 8px; padding: 1.5rem; background: var(--surface); }
+.result.warn { border-color: var(--amber); }
+.result h3 { margin: 0 0 0.25rem; font-size: 1.3rem; letter-spacing: -0.02em; }
+.result > p { margin: 0 0 1.25rem; color: var(--muted); }
+.kv { margin-bottom: 1rem; }
+.kv > span { display: block; font-weight: 600; font-size: 0.9rem; margin-bottom: 0.3rem; }
+.copyrow { display: flex; gap: 0.5rem; align-items: stretch; }
+.copyrow code {
+  flex: 1; min-width: 0; font: 0.9rem/1.4 var(--mono); background: var(--paper); border: 1.5px solid var(--line);
+  border-radius: 6px; padding: 0.6rem 0.75rem; overflow-x: auto; white-space: nowrap;
+}
+.copyrow.secret code { border-color: var(--amber); background: var(--amber-soft); }
+.callout { background: var(--amber-soft); border-radius: 6px; padding: 0.6rem 0.8rem; font-size: 0.9rem; margin: -0.4rem 0 1rem; }
+details { margin-top: 1rem; border-top: 1.5px solid var(--line); padding-top: 0.75rem; }
+summary { cursor: pointer; font-weight: 600; }
+details pre { font: 0.82rem/1.5 var(--mono); background: var(--paper); border-radius: 6px; padding: 0.75rem; overflow-x: auto; }
+details ol, details ul { padding-left: 1.2rem; }
+details li { margin-bottom: 0.3rem; }
+
+/* list of APIs */
+section.apis { margin-top: 3.5rem; }
+section.apis h2 { font-size: 1.35rem; letter-spacing: -0.02em; margin: 0 0 0.75rem; }
+.api-row { display: grid; grid-template-columns: 1fr auto; gap: 0.25rem 1rem; padding: 0.9rem 0; border-top: 1.5px solid var(--line); }
+.api-row:last-child { border-bottom: 1.5px solid var(--line); }
+.api-row .name { font-weight: 600; }
+.api-row .meta { color: var(--muted); font-size: 0.875rem; grid-column: 1; overflow-wrap: anywhere; }
+.api-row .meta code { font-family: var(--mono); font-size: 0.82rem; }
+.api-row .btns { grid-row: 1 / span 2; grid-column: 2; display: flex; gap: 0.4rem; align-items: center; }
+.api-row .newkey { grid-column: 1 / -1; }
+.badge { font-size: 0.78rem; font-weight: 600; padding: 0.1rem 0.45rem; border-radius: 4px; margin-left: 0.4rem; vertical-align: 0.1em; }
+.badge.ok { background: var(--pine-soft); color: var(--pine); }
+.badge.bad { background: var(--amber-soft); color: var(--amber); }
+.empty { color: var(--muted); }
+
+/* key gate */
+.gate { background: var(--surface); border: 1.5px solid var(--line); border-radius: 8px; padding: 1.25rem; margin-bottom: 2rem; }
+.gate h2 { margin: 0 0 0.3rem; font-size: 1.15rem; }
+.gate p { margin: 0 0 1rem; color: var(--muted); }
+.gate .copyrow input { flex: 1; }
+
+@media (max-width: 560px) {
+  main { padding-top: 2rem; }
+  .stages { grid-template-columns: 1fr; gap: 0.35rem; }
+  .stages li { border-top: 0; border-left: 3px solid var(--line); padding: 0.1rem 0 0.1rem 0.6rem; }
+  .api-row { grid-template-columns: 1fr; }
+  .api-row .btns { grid-row: auto; grid-column: 1; }
+  .copyrow { flex-wrap: wrap; }
+  .copyrow code { flex-basis: 100%; }
+}
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <p class="brand"><span>apiforge</span><button type="button" id="signout" hidden>Change access key</button></p>
+
+  <div class="gate" id="gate" hidden>
+    <h2>Enter your access key</h2>
+    <p>This is the FORGE_ADMIN_KEY set on the server. It stays in this browser.</p>
+    <div class="copyrow">
+      <input id="gate-key" type="password" autocomplete="current-password" aria-label="Access key">
+      <button type="button" class="primary" id="gate-save">Continue</button>
+    </div>
+    <div class="error" id="gate-error" hidden></div>
+  </div>
+
+  <h1>Turn a website into an API.</h1>
+  <p class="lede">Paste a site and say what you need from it. An agent explores it, writes an API, tests it against the live site, and gives you an endpoint and key for your automations.</p>
+
+  <form id="forge" novalidate>
+    <label class="field">
+      <span>Website</span>
+      <input class="url-input" id="url" name="url" type="url" inputmode="url" placeholder="https://hts.usitc.gov" required autocomplete="url">
+    </label>
+    <label class="field">
+      <span>What should the API do?</span>
+      <textarea id="goal" name="goal" placeholder="Search HS codes by keyword or number and return duty rates"></textarea>
+      <small>Optional, but specific goals give much better APIs. Leave it empty to cover the site’s main search and detail pages.</small>
+    </label>
+    <label class="field">
+      <span>Name</span>
+      <input id="name" name="name" placeholder="hts-tariffs" autocomplete="off">
+      <small>Optional. Becomes part of the endpoint address. Defaults to the site’s domain.</small>
+    </label>
+    <div class="actions">
+      <button class="primary" type="submit" id="go">Build API</button>
+      <span class="hint">Usually takes 3–10 minutes.</span>
+    </div>
+    <div class="error" id="form-error" hidden></div>
+  </form>
+
+  <section class="run" id="run" hidden aria-live="polite">
+    <div class="run-head">
+      <h2 id="run-title"></h2>
+      <span class="hint" id="run-status"></span>
+    </div>
+    <ol class="stages" id="stages">
+      <li data-stage="explore">Exploring the site</li>
+      <li data-stage="read">Finding its API</li>
+      <li data-stage="write">Writing your API</li>
+      <li data-stage="test">Testing it live</li>
+      <li data-stage="live">Live</li>
+    </ol>
+    <div class="trace" id="trace" role="log"></div>
+    <div id="result"></div>
+  </section>
+
+  <section class="apis">
+    <h2>Your APIs</h2>
+    <div id="apis"><p class="empty">Loading…</p></div>
+  </section>
+</main>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const STAGES = ["explore", "read", "write", "test", "live"];
+  const KEY_STORE = "apiforge.adminKey";
+  let pollTimer = null;
+
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  function getKey() { try { return localStorage.getItem(KEY_STORE) || ""; } catch { return ""; } }
+  function setKey(k) { try { k ? localStorage.setItem(KEY_STORE, k) : localStorage.removeItem(KEY_STORE); } catch {} }
+
+  async function api(path, opts = {}) {
+    const res = await fetch(path, {
+      ...opts,
+      headers: { "content-type": "application/json", "x-admin-key": getKey(), ...(opts.headers || {}) },
+    });
+    if (res.status === 401 || res.status === 503) {
+      const body = await res.json().catch(() => ({}));
+      showGate(res.status === 503
+        ? "This server has no FORGE_ADMIN_KEY set. Set it and restart the server."
+        : (getKey() ? "That access key wasn’t accepted. Check it and try again." : ""));
+      throw new Error(body.detail || "Access key needed");
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      const detail = Array.isArray(body.detail) ? body.detail.map((d) => d.msg).join("; ") : body.detail;
+      throw new Error(detail || `Request failed (${res.status})`);
+    }
+    return res.json();
+  }
+
+  // ---------- access key gate ----------
+  function showGate(message) {
+    $("gate").hidden = false;
+    $("signout").hidden = true;
+    $("gate-error").hidden = !message;
+    $("gate-error").textContent = message || "";
+    $("gate-key").focus();
+  }
+  $("gate-save").onclick = () => {
+    const k = $("gate-key").value.trim();
+    if (!k) return;
+    setKey(k);
+    $("gate").hidden = true;
+    $("signout").hidden = false;
+    $("gate-key").value = "";
+    boot();
+  };
+  $("gate-key").addEventListener("keydown", (e) => { if (e.key === "Enter") $("gate-save").click(); });
+  $("signout").onclick = () => { setKey(""); showGate(""); };
+
+  // ---------- copy ----------
+  document.addEventListener("click", async (e) => {
+    const btn = e.target.closest("[data-copy]");
+    if (!btn) return;
+    const text = btn.getAttribute("data-copy");
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = Object.assign(document.createElement("textarea"), { value: text });
+      document.body.append(ta); ta.select(); document.execCommand("copy"); ta.remove();
+    }
+    const old = btn.textContent;
+    btn.textContent = "Copied";
+    setTimeout(() => (btn.textContent = old), 1400);
+  });
+  const copyRow = (value, secret = false) =>
+    `<div class="copyrow${secret ? " secret" : ""}"><code>${esc(value)}</code>` +
+    `<button type="button" data-copy="${esc(value)}">Copy</button></div>`;
+
+  // ---------- forge ----------
+  $("forge").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    $("form-error").hidden = true;
+    const url = $("url").value.trim();
+    if (!url) { $("url").focus(); return showFormError("Paste the website address first."); }
+    $("go").disabled = true;
+    try {
+      const job = await api("/forge", {
+        method: "POST",
+        body: JSON.stringify({ url, goal: $("goal").value.trim() || null, name: $("name").value.trim() || null }),
+      });
+      watch(job.job_id);
+    } catch (err) {
+      showFormError(err.message);
+      $("go").disabled = false;
+    }
+  });
+  function showFormError(msg) { $("form-error").textContent = msg; $("form-error").hidden = false; }
+
+  function stageFromLog(lines, status) {
+    if (status === "done" || status === "done_with_failing_tests") return 5;
+    let s = 0;
+    for (const l of lines) {
+      if (/step \d+:|Reusing previous capture|Using existing capture/.test(l)) s = Math.max(s, 0);
+      if (/Found \d+ API endpoints/.test(l)) s = Math.max(s, 1);
+      if (/^Generating service/.test(l)) s = Math.max(s, 2);
+      if (/^Running smoke tests/.test(l)) s = Math.max(s, 3);
+    }
+    return s;
+  }
+
+  function renderStages(current, failed) {
+    document.querySelectorAll("#stages li").forEach((li, i) => {
+      li.className = i < current ? "done" : i === current ? (failed ? "failed" : (current < 4 ? "active" : "done")) : "";
+    });
+  }
+
+  function classify(line) {
+    if (/^\s+(GET|POST|PUT|PATCH|DELETE)\s/.test(line)) return "found";
+    if (/^\s+step \d+:/.test(line)) return "act";
+    if (/^PASS /.test(line)) return "pass";
+    if (/^FAIL |Traceback|Error/.test(line)) return "fail";
+    if (/^(Found|Generating|Running|Asking|Agent finished)/.test(line)) return "note";
+    return "act";
+  }
+
+  function renderTrace(lines) {
+    const el = $("trace");
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    el.innerHTML = lines.length
+      ? lines.filter((l) => !/^Done: /.test(l))
+          .map((l) => `<div class="${classify(l)}">${esc(l.replace(/^\s+step \d+: /, ""))}</div>`).join("")
+      : `<div class="act">Starting the browser…</div>`;
+    if (atBottom) el.scrollTop = el.scrollHeight;
+  }
+
+  function watch(jobId) {
+    clearTimeout(pollTimer);
+    $("run").hidden = false;
+    $("result").innerHTML = "";
+    const tick = async () => {
+      let job;
+      try {
+        job = await api(`/forge/jobs/${jobId}?log_lines=300`);
+      } catch (err) {
+        $("run-status").textContent = err.message;
+        pollTimer = setTimeout(tick, 5000);
+        return;
+      }
+      $("run-title").textContent = job.name;
+      const failed = job.status === "failed";
+      const running = job.status === "queued" || job.status === "running";
+      $("run-status").textContent = running
+        ? (job.status === "queued" ? "Waiting for the previous build to finish" : "Working")
+        : failed ? "Failed" : "Finished";
+      renderStages(stageFromLog(job.log, job.status), failed);
+      renderTrace(job.log);
+      if (running) { pollTimer = setTimeout(tick, 2000); return; }
+      $("go").disabled = false;
+      if (failed) renderFailure(job);
+      else renderResult(job.result, job.status);
+      $("result").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+      loadApis();
+    };
+    tick();
+  }
+
+  function renderFailure(job) {
+    $("result").innerHTML = `<div class="error"><strong>The build stopped.</strong> ${esc(job.error || "See the log above.")}
+      <br>Sites that block automated browsers, need a login, or render everything on the server can’t be turned into an API this way.</div>`;
+  }
+
+  function renderResult(r, status) {
+    if (!r) return;
+    const firstGet = (r.routes || []).find((x) => x.startsWith("GET ") && !x.endsWith("/health"));
+    const exPath = firstGet ? firstGet.split(" ")[1].replace(/^\/api\/[^/]+/, "").replace(/\{[^}]+\}/g, "VALUE") : "/health";
+    const exUrl = r.endpoint + exPath;
+    const curl = `curl "${exUrl}" \\\n  -H "x-api-key: ${r.api_key}"`;
+    const verified = r.verified && status === "done";
+    $("result").innerHTML = `
+      <div class="result${verified ? "" : " warn"}">
+        <h3>${verified ? "Your API is live" : "Your API is live, but its live tests failed"}</h3>
+        <p>${verified ? "It passed its tests against the real site." : "Some routes may not work yet. Check the log above, then rebuild with a more specific goal."}</p>
+        <div class="kv"><span>Endpoint</span>${copyRow(r.endpoint)}</div>
+        <div class="kv"><span>API key</span>${copyRow(r.api_key, true)}</div>
+        <p class="callout">Save this key now. It won’t be shown again. Send it in the <code>${esc(r.auth_header)}</code> header.</p>
+        <div class="kv"><span>Routes</span>
+          <div class="trace" style="max-height:12rem">${(r.routes || []).map((x) => `<div class="found">${esc(x)}</div>`).join("") || "<div class='act'>None found</div>"}</div>
+        </div>
+        <p style="margin:0"><a href="${esc(r.docs)}" target="_blank" rel="noopener">See every route and its parameters</a></p>
+        <details>
+          <summary>Try it with curl</summary>
+          <pre>${esc(curl)}</pre>
+          <button type="button" data-copy="${esc(curl)}">Copy</button>
+        </details>
+        <details>
+          <summary>Use it in KNIME</summary>
+          <ol>
+            <li>Add a <strong>GET Request</strong> node and set its URL to <code>${esc(exUrl)}</code>.</li>
+            <li>On the Request Headers tab, add <code>${esc(r.auth_header)}</code> with your key as the value. Store the key in a Credentials Configuration node instead of typing it in.</li>
+            <li>Connect the output to <strong>JSON to Table</strong>.</li>
+          </ol>
+        </details>
+      </div>`;
+  }
+
+  // ---------- APIs list ----------
+  async function loadApis() {
+    let list;
+    try { list = await api("/apis"); } catch { $("apis").innerHTML = `<p class="empty">Enter your access key to see your APIs.</p>`; return; }
+    if (!list.length) { $("apis").innerHTML = `<p class="empty">No APIs yet. Paste a website above to build your first one.</p>`; return; }
+    $("apis").innerHTML = list.map((a) => `
+      <div class="api-row" data-name="${esc(a.name)}">
+        <div class="name">${esc(a.name)}<span class="badge ${a.status === "verified" ? "ok" : "bad"}">${a.status === "verified" ? "Tested" : "Tests failing"}</span></div>
+        <div class="meta"><code>${esc(a.endpoint)}</code><br>${esc(a.goal || "")}</div>
+        <div class="btns">
+          <button type="button" data-copy="${esc(a.endpoint)}">Copy endpoint</button>
+          <button type="button" data-rotate="${esc(a.name)}">New key</button>
+        </div>
+        <div class="newkey"></div>
+      </div>`).join("");
+  }
+
+  document.addEventListener("click", async (e) => {
+    const btn = e.target.closest("[data-rotate]");
+    if (!btn) return;
+    const name = btn.getAttribute("data-rotate");
+    if (!confirm(`Create a new key for ${name}? The current key stops working immediately, so update your automations.`)) return;
+    btn.disabled = true;
+    const slot = btn.closest(".api-row").querySelector(".newkey");
+    try {
+      const r = await api(`/apis/${encodeURIComponent(name)}/rotate-key`, { method: "POST" });
+      slot.innerHTML = `${copyRow(r.api_key, true)}<p class="callout" style="margin:0.5rem 0 0">Save this key now. It won’t be shown again.</p>`;
+    } catch (err) {
+      slot.innerHTML = `<div class="error">${esc(err.message)}</div>`;
+    } finally { btn.disabled = false; }
+  });
+
+  // ---------- start ----------
+  async function boot() {
+    if (!getKey()) { showGate(""); $("apis").innerHTML = `<p class="empty">Enter your access key to see your APIs.</p>`; return; }
+    $("signout").hidden = false;
+    loadApis();
+    try {
+      const jobs = await api("/forge/jobs");
+      const live = jobs.find((j) => j.status === "running" || j.status === "queued");
+      if (live) { $("go").disabled = true; watch(live.id); }
+    } catch {}
+  }
+  boot();
+})();
+</script>
+</body>
+</html>

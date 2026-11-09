@@ -89,3 +89,30 @@ def test_forge_job_returns_endpoint_and_key(server):
     assert "GET /api/hts-tariffs/search" in res["routes"]
     data = client.get("/api/hts-tariffs/search", headers={"x-api-key": res["api_key"]}).json()
     assert data[0]["src"] == "NEW"
+
+
+def test_ui_and_optional_name(server):
+    srv, client, apis = server
+    assert "Turn a website into an API" in client.get("/").text
+    assert client.get("/api/alpha/docs").status_code == 200  # docs public, data not
+    assert client.get("/api/alpha/search").status_code == 401
+
+    seen = {}
+
+    def fake_build(name, goal, url, **kw):
+        seen.update(name=name, goal=goal, url=url)
+        make_service(apis, name, "X")
+        return {"name": name, "status": "verified"}
+
+    srv._build = fake_build
+    r = client.post("/forge", headers={"x-admin-key": "admin"}, json={"url": "www.trade-tariff.service.gov.uk/find"})
+    job_id = r.json()["job_id"]
+    for _ in range(50):
+        if client.get(f"/forge/jobs/{job_id}", headers={"x-admin-key": "admin"}).json()["status"] == "done":
+            break
+        time.sleep(0.1)
+    assert seen["name"] == "trade-tariff-service-gov-uk"
+    assert seen["url"] == "https://www.trade-tariff.service.gov.uk/find"
+    assert seen["goal"] == srv.DEFAULT_GOAL
+    jobs = client.get("/forge/jobs", headers={"x-admin-key": "admin"}).json()
+    assert jobs[0]["id"] == job_id and "api_key" not in str(jobs[0])

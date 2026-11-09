@@ -1,25 +1,26 @@
 # apiforge
 
-Give it a website and a goal. It sends an AI agent through the site in a headless browser, records the site's internal API calls, writes a clean REST API on top of them, tests it against the live site, and hands back an **endpoint and an API key**.
+Paste a website into the web page, say what you need from it, and press **Build API**. An AI agent explores the site in a headless browser, records its internal API calls, writes a clean REST API on top of them, tests it against the live site, and gives you an **endpoint and an API key** to use in your automations.
 
 ```bash
-curl -X POST https://forge.example.com/forge \
+apiforge server        # then open http://localhost:8000
+```
+
+The page asks for your access key (the `FORGE_ADMIN_KEY` you set), then shows:
+
+- a form for the website, what the API should do, and an optional name
+- live progress while it works: exploring, finding the API, writing it, testing it
+- the result: endpoint, API key (shown once, with copy buttons), routes, a curl example and KNIME instructions
+- your APIs, with a button to issue a new key for any of them
+
+Everything the page does is also available over HTTP for scripts and KNIME workflows:
+
+```bash
+curl -X POST http://localhost:8000/forge \
   -H "x-admin-key: $FORGE_ADMIN_KEY" -H "content-type: application/json" \
-  -d '{"name": "hts-tariffs",
-       "url": "https://hts.usitc.gov",
-       "goal": "Search HTS codes by keyword or number and return duty rates"}'
-# → {"job_id": "3f2a9c1b7e04", "status_url": "https://forge.example.com/forge/jobs/3f2a9c1b7e04"}
-
-curl https://forge.example.com/forge/jobs/3f2a9c1b7e04 -H "x-admin-key: $FORGE_ADMIN_KEY"
-# → {"status": "done",
-#    "result": {"endpoint": "https://forge.example.com/api/hts-tariffs",
-#               "api_key": "af_hts_tariffs_…",
-#               "auth_header": "x-api-key",
-#               "docs": "https://forge.example.com/api/hts-tariffs/docs",
-#               "routes": ["GET /api/hts-tariffs/search", "GET /api/hts-tariffs/codes/{code}", …],
-#               "verified": true}}
-
-curl "https://forge.example.com/api/hts-tariffs/search?q=coffee" -H "x-api-key: af_hts_tariffs_…"
+  -d '{"url": "https://hts.usitc.gov", "goal": "Search HTS codes by keyword or number and return duty rates"}'
+# → {"job_id": "3f2a9c1b7e04", "status_url": ".../forge/jobs/3f2a9c1b7e04"}
+# poll status_url until "status" is "done"; "result" holds endpoint, api_key, routes, docs
 ```
 
 ## How it works
@@ -59,14 +60,14 @@ apiforge list
 
 ## Deploy the forge server
 
-The root `Dockerfile` includes Chromium. It needs a persistent volume at `/data` (generated APIs and key hashes live there) and these env vars: `OPENAI_API_KEY` (or `ANTHROPIC_API_KEY`), `FORGE_ADMIN_KEY`, `PUBLIC_URL`.
+The web page is served by the forge server itself, so wherever the server runs, the page is at its root address. The root `Dockerfile` includes Chromium. It needs a persistent volume at `/data` (generated APIs and key hashes live there) and these env vars: `OPENAI_API_KEY` (or `ANTHROPIC_API_KEY`), `FORGE_ADMIN_KEY`, `PUBLIC_URL`.
 
 ```bash
 docker build -t apiforge .
 docker run -p 8000:8000 -v apiforge-data:/data --env-file .env apiforge
 ```
 
-On Railway, Render or Fly.io: deploy from the repo (it picks up the Dockerfile), attach a volume at `/data`, set the three env vars. Give it at least 2 GB of RAM for the browser. Each generated API also has its own Dockerfile in `apis/<name>/` if you'd rather deploy one standalone.
+Any host that runs a Docker container or Python works: a company server, a VM on AWS/Azure/Google Cloud, or a PaaS. Attach persistent storage at `/data`, set the env vars, and give it at least 2 GB of RAM for the browser. Put it behind HTTPS before using it over the internet, since keys travel in headers. Each generated API also has its own Dockerfile in `apis/<name>/` if you'd rather deploy one standalone.
 
 ## Using it from KNIME
 

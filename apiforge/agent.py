@@ -119,20 +119,33 @@ class BrowserSession:
         self.page.goto(url, timeout=30000)
         return f"Opened {url}"
 
+    def _label(self, el) -> str:
+        try:
+            label = el.evaluate("e => (e.getAttribute('aria-label') || e.placeholder || e.innerText"
+                                " || e.title || e.name || e.value || '').trim().replace(/\\s+/g, ' ').slice(0, 40)")
+        except Exception:
+            label = ""
+        return f"“{label}”" if label else "an unlabeled element"
+
     def click(self, element_id: int) -> str:
-        self._el(element_id).click(timeout=8000)
-        return f"Clicked element {element_id}"
+        el = self._el(element_id)
+        label = self._label(el)
+        el.click(timeout=8000)
+        return f"Clicked {label}"
 
     def type(self, element_id: int, text: str, submit: bool = False) -> str:
         el = self._el(element_id)
+        label = self._label(el)
         el.fill(text, timeout=8000)
         if submit:
             el.press("Enter")
-        return f"Typed into element {element_id}" + (" and pressed Enter" if submit else "")
+        return f"Typed “{text}” into {label}" + (" and pressed Enter" if submit else "")
 
     def select(self, element_id: int, value: str) -> str:
-        self._el(element_id).select_option(value, timeout=8000)
-        return f"Selected {value!r} in element {element_id}"
+        el = self._el(element_id)
+        label = self._label(el)
+        el.select_option(value, timeout=8000)
+        return f"Chose “{value}” in {label}"
 
     def scroll(self) -> str:
         self.page.mouse.wheel(0, 2500)
@@ -234,7 +247,7 @@ def explore(url: str, goal: str, har_path: Path, *, max_steps: int = 30, headles
                     outcome = getattr(session, call.name)(**args)
                 except Exception as exc:
                     outcome = f"Action failed: {str(exc).splitlines()[0][:200] if str(exc) else exc!r}"
-                log(f"  step {steps}: {call.name} {json.dumps(call.input)[:100]} -> {outcome}")
+                log(f"  step {steps}: {outcome}")
                 results.append((call.id, _observation(session, outcome)))
             history.append(Turn("tool_results", results=results))
             if finished:

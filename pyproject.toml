@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apiforge"
-version = "0.3.0"
+version = "0.4.0"
 description = "Browse a website once, get a deployable REST API for it."
 requires-python = ">=3.11"
 dependencies = [
@@ -26,4 +26,4 @@ apiforge = "apiforge.cli:main"
 packages = ["apiforge"]
 
 [tool.setuptools.package-data]
-apiforge = ["templates/*", "templates/.dockerignore"]
+apiforge = ["templates/*", "templates/.dockerignore", "static/*"]

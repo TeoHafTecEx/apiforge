@@ -1,6 +1,8 @@
 """The forge server: send a URL and a goal, get back a live endpoint and an API key.
 
-  POST /forge                {"name", "url", "goal"}         (admin key)  -> job id
+  GET  /                     the web UI: paste a website, get an endpoint + key
+  POST /forge                {"url", "goal"?, "name"?}       (admin key)  -> job id
+  GET  /forge/jobs           recent jobs                     (admin key)
   GET  /forge/jobs/{id}      status, log, and when done: endpoint + api_key
   GET  /apis                 list of live APIs                (admin key)
   POST /apis/{name}/rotate-key                                (admin key)
@@ -21,9 +23,10 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from starlette.routing import Mount
 
@@ -99,12 +102,16 @@ app = FastAPI(title="apiforge", version="0.2.0", lifespan=_lifespan)
 
 
 # ---------- auth ----------
+# Health and the docs (route list only, no data) are readable without a key.
+PUBLIC_SUBPATHS = (["health"], ["docs"], ["openapi.json"], ["docs", "oauth2-redirect"])
+
+
 @app.middleware("http")
 async def api_key_auth(request: Request, call_next):
     parts = request.url.path.split("/")
     if len(parts) >= 3 and parts[1] == "api" and parts[2]:
         name = parts[2]
-        if parts[3:] != ["health"] and not keys.check(APIS_DIR, name, request.headers.get("x-api-key")):
+        if parts[3:] not in PUBLIC_SUBPATHS and not keys.check(APIS_DIR, name, request.headers.get("x-api-key")):
             return JSONResponse({"error": "missing or invalid x-api-key"}, status_code=401)
     return await call_next(request)
 
@@ -117,12 +124,25 @@ def require_admin(x_admin_key: str | None = Header(default=None)):
 
 
 # ---------- forge ----------
+DEFAULT_GOAL = ("Expose this website's main data and search features as a clean API: "
+                "searching, listing, and fetching the details of its main items.")
+
+
 class ForgeRequest(BaseModel):
-    name: str = Field(examples=["hts-tariffs"])
     url: str = Field(examples=["https://hts.usitc.gov"])
-    goal: str = Field(examples=["Search HTS codes by keyword or number and return duty rates"])
+    goal: str | None = Field(None, examples=["Search HTS codes by keyword or number and return duty rates"])
+    name: str | None = Field(None, examples=["hts-tariffs"], description="defaults to the site's domain")
     max_steps: int = Field(30, ge=5, le=80)
     recapture: bool = True
+
+    def resolved_name(self) -> str:
+        if self.name and self.name.strip():
+            return pipeline.slugify(self.name)
+        host = urlsplit(self.url if "://" in self.url else "https://" + self.url).netloc
+        return pipeline.slugify(host.removeprefix("www."))
+
+    def resolved_url(self) -> str:
+        return self.url if "://" in self.url else "https://" + self.url.strip()
 
 
 def _base_url(request: Request) -> str:
@@ -139,8 +159,8 @@ def _run_job(job_id: str, req: ForgeRequest, base_url: str) -> None:
     with _build_lock:
         job["status"] = "running"
         try:
-            name = pipeline.slugify(req.name)
-            meta = _build(name, req.goal, req.url, mode="agent", recapture=req.recapture,
+            name = req.resolved_name()
+            meta = _build(name, req.goal or DEFAULT_GOAL, req.resolved_url(), mode="agent", recapture=req.recapture,
                           max_steps=req.max_steps, apis_dir=APIS_DIR, log=log)
             mount(name)
             endpoints = _routes(name)
@@ -177,11 +197,23 @@ def _now() -> str:
 
 @app.post("/forge", dependencies=[Depends(require_admin)], status_code=202)
 def forge(req: ForgeRequest, request: Request):
+    try:
+        name = req.resolved_name()
+    except ValueError:
+        raise HTTPException(422, "That doesn't look like a website address.")
     job_id = uuid.uuid4().hex[:12]
-    jobs[job_id] = {"id": job_id, "name": req.name, "status": "queued", "log": [],
+    jobs[job_id] = {"id": job_id, "name": name, "url": req.resolved_url(),
+                    "goal": req.goal or DEFAULT_GOAL, "status": "queued", "log": [],
                     "created_at": _now(), "result": None, "error": None}
     threading.Thread(target=_run_job, args=(job_id, req, _base_url(request)), daemon=True).start()
     return {"job_id": job_id, "status_url": f"{_base_url(request)}/forge/jobs/{job_id}"}
+
+
+@app.get("/forge/jobs", dependencies=[Depends(require_admin)])
+def list_jobs():
+    """Recent jobs, newest first (no keys or logs), so the UI can resume after a refresh."""
+    rows = sorted(jobs.values(), key=lambda j: j["created_at"], reverse=True)[:20]
+    return [{k: j.get(k) for k in ("id", "name", "url", "status", "created_at", "finished_at")} for j in rows]
 
 
 @app.get("/forge/jobs/{job_id}", dependencies=[Depends(require_admin)])
@@ -209,6 +241,14 @@ def rotate_key(name: str):
     if name not in mounted():
         raise HTTPException(404, "No such API.")
     return {"name": name, "api_key": keys.issue(APIS_DIR, name), "auth_header": "x-api-key"}
+
+
+STATIC = Path(__file__).parent / "static"
+
+
+@app.get("/", include_in_schema=False)
+def ui():
+    return FileResponse(STATIC / "index.html")
 
 
 @app.get("/health")
